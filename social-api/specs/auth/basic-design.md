@@ -1,21 +1,26 @@
-# Thiết kế cơ bản (Basic Design): Module Authentication & User
+# Thiết kế cơ bản (Basic Design): Module Authentication & Audit Log
 
-Tài liệu thiết kế cơ bản cho chức năng xác thực người dùng (**Authentication - Login, Register**) và mô hình dữ liệu người dùng (**User Model**) cho hệ thống Social Network API.
+Tài liệu thiết kế cơ bản cho chức năng xác thực người dùng (**Authentication - Login, Register, Logout, Change Password**), mô hình dữ liệu người dùng (**User Model**) và hệ thống ghi vết kiểm toán bảo mật (**Auth Audit Log**) cho hệ thống Social Network API.
 
 ---
 
 ## 1. Tổng quan & Mục tiêu
 
-Module **Authentication** chịu trách nhiệm quản lý danh tính và phiên truy cập của người dùng trong hệ thống:
+Module **Authentication** chịu trách nhiệm quản lý danh tính, phiên truy cập và bảo mật tài khoản người dùng:
 - Cung cấp cơ chế đăng ký tài khoản mới (`Register`) với xác thực dữ liệu chặt chẽ.
 - Cung cấp cơ chế đăng nhập (`Login`) cấp phát cặp token **JWT (Access Token & Refresh Token)**.
 - Quản lý trạng thái phiên làm việc, hỗ trợ làm mới token (`Refresh Token`) và đăng xuất (`Logout`) thông qua Redis.
-- Cung cấp thông tin tài khoản hiện tại (`Get Profile / Me`).
-- Thiết lập mô hình dữ liệu **User Entity** chuẩn mực, kế thừa `BaseEntity` (hỗ trợ UUID, audit timestamps, soft-delete).
+- Cung cấp chức năng đổi mật khẩu (`Change Password`) an toàn, tự động thu hồi (revoke) các phiên đăng nhập cũ.
+- **Hệ thống Ghi vết kiểm toán (Auth Audit Log)**:
+  - Tự động ghi nhận mọi thao tác nhạy cảm liên quan đến danh tính: `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`, `CHANGE_PASSWORD_SUCCESS`, `CHANGE_PASSWORD_FAILED`.
+  - Thu thập đầy đủ thông tin: địa chỉ IP (`ip_address`), tác nhân người dùng (`user_agent`), thiết bị (`device_info`), thời điểm thực hiện và lý do lỗi (nếu thất bại).
+  - Vận hành theo cơ chế phi chặn (Asynchronous / Non-blocking) đảm bảo không gây suy giảm hiệu năng của các luồng xử lý chính.
 
 ---
 
-## 2. Mô hình dữ liệu (Data Model - User Entity)
+## 2. Mô hình dữ liệu (Data Model)
+
+Kế thừa cấu trúc từ `BaseEntity` (`id` UUID v4, `created_at`, `updated_at`, `deleted_at`).
 
 ### 2.1. Bảng `users`
 Kế thừa cấu trúc từ `BaseEntity` (`id` UUID, `created_at`, `updated_at`, `deleted_at`).
@@ -36,7 +41,30 @@ Kế thừa cấu trúc từ `BaseEntity` (`id` UUID, `created_at`, `updated_at`
 | `updated_at` | TIMESTAMPTZ | Có | - | Thời gian cập nhật gần nhất |
 | `deleted_at` | TIMESTAMPTZ | Không | - | Thời gian xóa mềm (soft delete) |
 
-### 2.2. Các Enums liên quan
+---
+
+### 2.2. Bảng `auth_audit_logs` (Nhật ký kiểm toán bảo mật)
+
+Ghi nhận toàn bộ thao tác liên quan đến đăng nhập, đăng xuất và đổi mật khẩu:
+
+| Tên cột | Kiểu dữ liệu | Bắt buộc | Khóa / Chỉ mục | Mô tả / Giá trị mặc định |
+| :--- | :--- | :---: | :---: | :--- |
+| `id` | UUID | Có | PK | Khóa chính tự sinh (UUID v4) |
+| `user_id` | UUID | Không | FK, Index | ID người dùng thực hiện (null nếu login thất bại không rõ user) |
+| `identifier` | VARCHAR(255) | Có | Index | Email hoặc username người dùng nhập khi thực hiện hành động |
+| `action` | VARCHAR(50) | Có | Index | Hành vi: `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`, `CHANGE_PASSWORD_SUCCESS`, `CHANGE_PASSWORD_FAILED` |
+| `status` | VARCHAR(20) | Có | Index | Kết quả thao tác: `SUCCESS`, `FAILURE` |
+| `ip_address` | VARCHAR(45) | Có | - | Địa chỉ IP của Client (IPv4 hoặc IPv6) |
+| `user_agent` | TEXT | Không | - | Chuỗi User-Agent từ Header trình duyệt/app |
+| `device_info` | VARCHAR(150) | Không | - | Tên thiết bị/hệ điều hành rút trích (ví dụ: `iOS App`, `Chrome / macOS`) |
+| `failure_reason` | VARCHAR(255) | Không | - | Lý do lỗi (ví dụ: `INVALID_CREDENTIALS`, `ACCOUNT_BANNED`, `WRONG_OLD_PASSWORD`) |
+| `metadata` | JSONB | Không | - | Dữ liệu phụ trợ bổ sung |
+| `created_at` | TIMESTAMPTZ | Có | Index (DESC) | Thời điểm ghi nhận bản ghi nhật ký |
+
+---
+
+### 2.3. Các Enums liên quan
+
 ```typescript
 export enum UserRole {
   USER = 'USER',
@@ -48,141 +76,175 @@ export enum UserStatus {
   INACTIVE = 'INACTIVE',
   BANNED = 'BANNED',
 }
+
+export enum AuthAuditAction {
+  LOGIN_SUCCESS = 'LOGIN_SUCCESS',
+  LOGIN_FAILED = 'LOGIN_FAILED',
+  LOGOUT = 'LOGOUT',
+  CHANGE_PASSWORD_SUCCESS = 'CHANGE_PASSWORD_SUCCESS',
+  CHANGE_PASSWORD_FAILED = 'CHANGE_PASSWORD_FAILED',
+}
+
+export enum AuditStatus {
+  SUCCESS = 'SUCCESS',
+  FAILURE = 'FAILURE',
+}
 ```
 
-### 2.3. Sơ đồ thực thể quan hệ (ERD)
+---
+
+### 2.4. Sơ đồ thực thể quan hệ (ERD)
 
 ```mermaid
 erDiagram
+    users ||--o{ auth_audit_logs : "has audit records"
+
     users {
         uuid id PK "UUID v4"
-        varchar email UK "Email đăng nhập"
-        varchar username UK "Tên người dùng duy nhất"
+        varchar email UK
+        varchar username UK
         varchar password "Bcrypt hash"
-        varchar full_name "Họ và tên"
-        text avatar_url "Link avatar"
-        text bio "Tiểu sử"
+        varchar full_name
+        text avatar_url
+        text bio
         varchar role "USER | ADMIN"
         varchar status "ACTIVE | INACTIVE | BANNED"
-        timestamptz last_login_at "Lần login cuối"
-        timestamptz created_at "Audit created"
-        timestamptz updated_at "Audit updated"
-        timestamptz deleted_at "Soft delete"
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
+    }
+
+    auth_audit_logs {
+        uuid id PK "UUID v4"
+        uuid user_id FK "Nullable"
+        varchar identifier "Email / Username"
+        varchar action "LOGIN_SUCCESS | LOGIN_FAILED | LOGOUT | CHANGE_PASSWORD_SUCCESS | CHANGE_PASSWORD_FAILED"
+        varchar status "SUCCESS | FAILURE"
+        varchar ip_address "Client IP"
+        text user_agent "Client UA"
+        varchar device_info "OS & Browser"
+        varchar failure_reason "Lý do nếu fail"
+        jsonb metadata
+        timestamptz created_at "Audit Timestamp"
     }
 ```
 
 ---
 
-## 3. Luồng xử lý nghiệp vụ (Business Workflows)
+## 3. Luồng xử lý nghiệp vụ & Audit Logging
 
-### 3.1. Luồng Đăng ký (Register)
+### 3.1. Luồng Đăng nhập (Login) kèm Ghi nhận Audit Log
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Client
-    participant AuthController
-    participant AuthService
-    participant UserRepository
-    participant Database
-
-    Client->>AuthController: POST /api/v1/auth/register (email, username, password, fullName)
-    AuthController->>AuthService: register(dto)
-    AuthService->>UserRepository: Check email & username tồn tại
-    UserRepository->>Database: Query WHERE email = :email OR username = :username
-    Database-->>UserRepository: Kết quả
-    alt Email hoặc Username đã tồn tại
-        UserRepository-->>AuthService: Trùng lặp
-        AuthService-->>AuthController: Ném lỗi ConflictException (409)
-        AuthController-->>Client: 409 Conflict (Email/Username already exists)
-    else Dữ liệu hợp lệ
-        AuthService->>AuthService: Băm mật khẩu (Bcrypt hash 10 rounds)
-        AuthService->>UserRepository: create(userEntity)
-        UserRepository->>Database: INSERT INTO users
-        Database-->>UserRepository: User đã lưu
-        AuthService->>AuthService: Sinh Access Token + Refresh Token
-        AuthService-->>AuthController: { user, tokens }
-        AuthController-->>Client: 201 Created (Token & Profile)
-    end
-```
-
-### 3.2. Luồng Đăng nhập (Login)
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client
-    participant AuthController
-    participant AuthService
-    participant UserRepository
+    participant AuthCtrl as AuthController
+    participant AuthSvc as AuthService
+    participant UserRepo as UserRepository
     participant Redis
+    participant AuditSvc as AuditLogService (Async)
     participant Database
 
-    Client->>AuthController: POST /api/v1/auth/login (identifier: email/username, password)
-    AuthController->>AuthService: login(dto)
-    AuthService->>UserRepository: Tìm user theo email hoặc username (kèm password hash)
-    UserRepository->>Database: SELECT * FROM users WHERE email = :id OR username = :id
-    Database-->>UserRepository: User
+    Client->>AuthCtrl: POST /api/v1/auth/login (identifier, password, ip, userAgent)
+    AuthCtrl->>AuthSvc: login(dto, clientInfo)
+    AuthSvc->>UserRepo: Tìm user theo email hoặc username (kèm password hash)
+    UserRepo->>Database: SELECT * FROM users WHERE email = :id OR username = :id
+    Database-->>UserRepo: User
+
     alt User không tồn tại hoặc sai mật khẩu
-        AuthService-->>AuthController: UnauthorizedException (401)
-        AuthController-->>Client: 401 Unauthorized (Invalid credentials)
+        AuthSvc->>AuditSvc: logAuthEvent({ action: LOGIN_FAILED, status: FAILURE, identifier, failureReason: "INVALID_CREDENTIALS", clientInfo })
+        AuditSvc--)Database: INSERT INTO auth_audit_logs (Bất đồng bộ)
+        AuthSvc-->>AuthCtrl: UnauthorizedException (401)
+        AuthCtrl-->>Client: 401 Unauthorized
     else Tài khoản bị khóa (BANNED/INACTIVE)
-        AuthService-->>AuthController: ForbiddenException (403)
-        AuthController-->>Client: 403 Forbidden (Account is not active)
+        AuthSvc->>AuditSvc: logAuthEvent({ action: LOGIN_FAILED, status: FAILURE, identifier, failureReason: "ACCOUNT_LOCKED", clientInfo })
+        AuditSvc--)Database: INSERT INTO auth_audit_logs
+        AuthSvc-->>AuthCtrl: ForbiddenException (403)
+        AuthCtrl-->>Client: 403 Forbidden
     else Hợp lệ
-        AuthService->>AuthService: So khớp Bcrypt password
-        AuthService->>UserRepository: Cập nhật last_login_at
-        AuthService->>AuthService: Ký Access Token (15m) & Refresh Token (7d)
-        AuthService->>Redis: Lưu Refresh Token (Key: auth:refresh:{userId}, TTL 7d)
-        AuthService-->>AuthController: { user, tokens }
-        AuthController-->>Client: 200 OK (Tokens & User profile)
+        AuthSvc->>AuthSvc: So khớp Bcrypt password thành công
+        AuthSvc->>UserRepo: Cập nhật last_login_at
+        AuthSvc->>AuthSvc: Ký Access Token & Refresh Token
+        AuthSvc->>Redis: Lưu Refresh Token (Key: auth:refresh:{userId}, TTL 7d)
+        AuthSvc->>AuditSvc: logAuthEvent({ action: LOGIN_SUCCESS, status: SUCCESS, userId: user.id, identifier, clientInfo })
+        AuditSvc--)Database: INSERT INTO auth_audit_logs
+        AuthSvc-->>AuthCtrl: { user, tokens }
+        AuthCtrl-->>Client: 200 OK (Tokens & User profile)
     end
 ```
 
-### 3.3. Luồng Làm mới Token (Refresh Token)
+---
+
+### 3.2. Luồng Đăng xuất (Logout) kèm Ghi nhận Audit Log
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Client
-    participant AuthController
-    participant AuthService
+    participant AuthCtrl as AuthController
+    participant AuthSvc as AuthService
     participant Redis
+    participant AuditSvc as AuditLogService (Async)
+    participant Database
 
-    Client->>AuthController: POST /api/v1/auth/refresh-token (refreshToken)
-    AuthController->>AuthService: refreshToken(token)
-    AuthService->>AuthService: Verify chữ ký JWT Refresh Token
-    AuthService->>Redis: Kiểm tra token có hợp lệ trong Redis
-    alt Token không khớp / Đã bị revoke
-        Redis-->>AuthService: Token không tồn tại
-        AuthService-->>AuthController: UnauthorizedException (401)
-        AuthController-->>Client: 401 Unauthorized
-    else Token hợp lệ
-        AuthService->>AuthService: Ký Access Token mới & Rotate Refresh Token mới
-        AuthService->>Redis: Cập nhật Refresh Token mới vào Redis
-        AuthService-->>AuthController: Cặp tokens mới
-        AuthController-->>Client: 200 OK (Tokens mới)
-    end
+    Client->>AuthCtrl: POST /api/v1/auth/logout (Bearer Token, clientInfo)
+    AuthCtrl->>AuthSvc: logout(userId, clientInfo)
+    AuthSvc->>Redis: Xóa Refresh Token của user (DEL auth:refresh:{userId})
+    AuthSvc->>AuditSvc: logAuthEvent({ action: LOGOUT, status: SUCCESS, userId, clientInfo })
+    AuditSvc--)Database: INSERT INTO auth_audit_logs (Bất đồng bộ)
+    AuthSvc-->>AuthCtrl: Thành công
+    AuthCtrl-->>Client: 200 OK ({ message: "Logged out successfully" })
 ```
 
-### 3.4. Luồng Đăng xuất (Logout)
+---
+
+### 3.3. Luồng Đổi mật khẩu (Change Password) kèm Ghi nhận Audit Log
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Client
-    participant AuthController
-    participant AuthService
+    participant AuthCtrl as AuthController
+    participant AuthSvc as AuthService
+    participant UserRepo as UserRepository
     participant Redis
+    participant AuditSvc as AuditLogService (Async)
+    participant Database
 
-    Client->>AuthController: POST /api/v1/auth/logout (Bearer Access Token)
-    AuthController->>AuthService: logout(userId)
-    AuthService->>Redis: Xóa Refresh Token của user (DEL auth:refresh:{userId})
-    AuthService-->>AuthController: Thành công
-    AuthController-->>Client: 200 OK ({ message: "Logged out successfully" })
+    Client->>AuthCtrl: POST /api/v1/auth/change-password (oldPassword, newPassword)
+    AuthCtrl->>AuthSvc: changePassword(userId, dto, clientInfo)
+    AuthSvc->>UserRepo: Tìm user theo userId (kèm password hash)
+    UserRepo->>Database: Query user
+    Database-->>UserRepo: User
+
+    AuthSvc->>AuthSvc: So sánh oldPassword với password hash hiện tại (Bcrypt)
+    alt Mật khẩu cũ không chính xác
+        AuthSvc->>AuditSvc: logAuthEvent({ action: CHANGE_PASSWORD_FAILED, status: FAILURE, userId, failureReason: "WRONG_OLD_PASSWORD", clientInfo })
+        AuditSvc--)Database: INSERT INTO auth_audit_logs
+        AuthSvc-->>AuthCtrl: BadRequestException (400 - "Mật khẩu hiện tại không chính xác")
+        AuthCtrl-->>Client: 400 Bad Request
+    else Mật khẩu mới trùng mật khẩu cũ
+        AuthSvc-->>AuthCtrl: BadRequestException (400 - "Mật khẩu mới không được trùng mật khẩu cũ")
+        AuthCtrl-->>Client: 400 Bad Request
+    else Hợp lệ
+        AuthSvc->>AuthSvc: Băm newPassword (Bcrypt salt 10)
+        AuthSvc->>UserRepo: UPDATE users SET password = :newHash WHERE id = :userId
+        Database-->>UserRepo: Đã cập nhật
+        AuthSvc->>Redis: Xóa toàn bộ Refresh Token cũ trong Redis (Bắt buộc các thiết bị khác login lại)
+        AuthSvc->>AuditSvc: logAuthEvent({ action: CHANGE_PASSWORD_SUCCESS, status: SUCCESS, userId, clientInfo })
+        AuditSvc--)Database: INSERT INTO auth_audit_logs
+        AuthSvc-->>AuthCtrl: Thành công
+        AuthCtrl-->>Client: 200 OK ({ message: "Đổi mật khẩu thành công. Vui lòng đăng nhập lại." })
+    end
 ```
 
 ---
 
 ## 4. Đặc tả API Endpoints
 
-Tất cả các route tuân thủ tiền tố chung `/api/v1/auth`:
+Tất cả các route tuân thủ tiền tố chung: `/api/v1/auth`
 
 ### 4.1. `POST /api/v1/auth/register`
 - **Mô tả**: Đăng ký người dùng mới.
@@ -196,38 +258,12 @@ Tất cả các route tuân thủ tiền tố chung `/api/v1/auth`:
     "fullName": "Nguyen Van A"
   }
   ```
-- **Validation**:
-  - `email`: định dạng email hợp lệ, tối đa 255 ký tự.
-  - `username`: chữ cái thường, số, dấu gạch dưới `_`, từ 3-30 ký tự (`/^[a-z0-9_]{3,30}$/`).
-  - `password`: tối thiểu 8 ký tự, gồm ít nhất 1 chữ hoa, 1 chữ thường, 1 số và 1 ký tự đặc biệt.
-  - `fullName`: chuỗi ký tự không rỗng, từ 2-100 ký tự.
 - **Response**: `201 Created`
-  ```json
-  {
-    "statusCode": 201,
-    "data": {
-      "user": {
-        "id": "b6a82741-2cbe-4c4f-a9cb-b61005d58ff3",
-        "email": "user@example.com",
-        "username": "user123",
-        "fullName": "Nguyen Van A",
-        "role": "USER",
-        "status": "ACTIVE",
-        "createdAt": "2026-10-02T15:00:00.000Z"
-      },
-      "tokens": {
-        "accessToken": "eyJhbGciOi...",
-        "refreshToken": "eyJhbGciOi...",
-        "expiresIn": 900
-      }
-    }
-  }
-  ```
 
 ---
 
 ### 4.2. `POST /api/v1/auth/login`
-- **Mô tả**: Đăng nhập lấy cặp JWT token.
+- **Mô tả**: Đăng nhập lấy cặp JWT token. Tự động ghi lại `auth_audit_logs` (thành công hoặc thất bại).
 - **Quyền truy cập**: Public (`@Public()`).
 - **Request Body**:
   ```json
@@ -261,23 +297,25 @@ Tất cả các route tuân thủ tiền tố chung `/api/v1/auth`:
 
 ---
 
-### 4.3. `POST /api/v1/auth/refresh-token`
-- **Mô tả**: Cấp mới Access Token khi hết hạn bằng Refresh Token hợp lệ.
-- **Quyền truy cập**: Public (`@Public()`).
+### 4.3. `POST /api/v1/auth/change-password`
+- **Mô tả**: Đổi mật khẩu tài khoản đang đăng nhập. Hủy toàn bộ token cũ và ghi vết vào `auth_audit_logs`.
+- **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Request Body**:
   ```json
   {
-    "refreshToken": "eyJhbGciOi..."
+    "oldPassword": "StrongPassword@123",
+    "newPassword": "NewStrongPassword@456"
   }
   ```
+- **Validation**:
+  - `oldPassword`: không được để trống.
+  - `newPassword`: tối thiểu 8 ký tự, gồm ít nhất 1 chữ hoa, 1 chữ thường, 1 chữ số, 1 ký tự đặc biệt, không trùng `oldPassword`.
 - **Response**: `200 OK`
   ```json
   {
     "statusCode": 200,
     "data": {
-      "accessToken": "eyJhbGciOi...",
-      "refreshToken": "eyJhbGciOi...",
-      "expiresIn": 900
+      "message": "Đổi mật khẩu thành công. Các phiên đăng nhập trước đó đã được thu hồi."
     }
   }
   ```
@@ -285,7 +323,7 @@ Tất cả các route tuân thủ tiền tố chung `/api/v1/auth`:
 ---
 
 ### 4.4. `POST /api/v1/auth/logout`
-- **Mô tả**: Đăng xuất, hủy bỏ Refresh Token trong Redis.
+- **Mô tả**: Đăng xuất, hủy phiên Redis và ghi vết vào `auth_audit_logs`.
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Response**: `200 OK`
   ```json
@@ -299,43 +337,63 @@ Tất cả các route tuân thủ tiền tố chung `/api/v1/auth`:
 
 ---
 
-### 4.5. `GET /api/v1/auth/me`
-- **Mô tả**: Lấy thông tin tài khoản đang đăng nhập.
+### 4.5. `GET /api/v1/auth/audit-logs`
+- **Mô tả**: Xem lịch sử các thao tác bảo mật (đăng nhập, đổi mật khẩu, đăng xuất) của tài khoản hiện tại.
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
+- **Query Params**:
+  - `page`: Trang (mặc định: `1`).
+  - `limit`: Số bản ghi (mặc định: `10`).
 - **Response**: `200 OK`
   ```json
   {
     "statusCode": 200,
     "data": {
-      "id": "b6a82741-2cbe-4c4f-a9cb-b61005d58ff3",
-      "email": "user@example.com",
-      "username": "user123",
-      "fullName": "Nguyen Van A",
-      "avatarUrl": null,
-      "bio": null,
-      "role": "USER",
-      "status": "ACTIVE",
-      "createdAt": "2026-10-02T15:00:00.000Z"
+      "items": [
+        {
+          "id": "e9b110a2-11cf-49b8-a764-98124801fe1a",
+          "action": "LOGIN_SUCCESS",
+          "status": "SUCCESS",
+          "ipAddress": "14.241.23.10",
+          "deviceInfo": "Chrome / macOS",
+          "createdAt": "2026-10-02T19:00:00.000Z"
+        },
+        {
+          "id": "c1f7a220-410a-4fa4-9a87-321ba68194de",
+          "action": "CHANGE_PASSWORD_SUCCESS",
+          "status": "SUCCESS",
+          "ipAddress": "14.241.23.10",
+          "deviceInfo": "Chrome / macOS",
+          "createdAt": "2026-10-02T18:45:00.000Z"
+        },
+        {
+          "id": "84a921d0-30aa-4efb-88cb-11239801ecb2",
+          "action": "LOGIN_FAILED",
+          "status": "FAILURE",
+          "failureReason": "INVALID_CREDENTIALS",
+          "ipAddress": "113.161.40.55",
+          "deviceInfo": "Unknown Device / Linux",
+          "createdAt": "2026-10-02T18:30:00.000Z"
+        }
+      ],
+      "meta": {
+        "totalItems": 15,
+        "currentPage": 1,
+        "totalPages": 2
+      }
     }
   }
   ```
 
 ---
 
-## 5. Quy chuẩn bảo mật & kỹ thuật (Security & Technical Requirements)
+## 5. Quy chuẩn kỹ thuật & Bảo mật Audit Log
 
-1. **Mật khẩu**:
-   - Sử dụng thuật toán `bcrypt` với `saltRounds = 10`.
-   - Cột `password` trong Entity phải có cờ `{ select: false }` để đảm bảo không bị lộ khi query thông thường.
-2. **Cấu hình JWT Token**:
-   - **Access Token**: Hạn dùng ngắn (15 phút), chứa payload: `{ sub: user.id, email: user.email, role: user.role }`.
-   - **Refresh Token**: Hạn dùng dài (7 ngày), mã hóa và xác thực chữ ký an toàn.
-3. **Quản lý phiên Redis**:
-   - Khóa lưu trữ: `auth:refresh:{userId}` lưu refresh token hiện thời.
-   - Khi logout hoặc rotation, xóa/ghi đè key với thời gian TTL tương ứng.
-4. **Xử lý lỗi**:
-   - Sử dụng [HttpExceptionFilter](file:///Users/macos/project/personal/aws/social/social-api/src/common/filters/http-exception.filter.ts) đã có để format lỗi trả về theo chuẩn `statusCode, code, message, details, timestamp`.
-   - Lỗi đăng nhập trả về mã `401 Unauthorized` chung (không chỉ rõ email sai hay mật khẩu sai để tránh user enumeration).
-5. **Kế thừa kiến trúc**:
-   - Entity kế thừa [BaseEntity](file:///Users/macos/project/personal/aws/social/social-api/src/shared/base.entity.ts).
-   - Repository thao tác bảng `users` kế thừa [BaseRepository](file:///Users/macos/project/personal/aws/social/social-api/src/common/repositories/base.repository.ts).
+1. **Hiệu năng phi chặn (Non-blocking & Asynchronous)**:
+   - Việc ghi bản ghi vào bảng `auth_audit_logs` được thực hiện thông qua cơ chế bất đồng bộ (ví dụ: NestJS `EventEmitter2` phát ra event `@OnEvent('auth.audit')` hoặc đưa vào Redis Queue/AWS SQS worker).
+   - Đảm bảo lỗi khi ghi log database không làm gián đoạn luồng trả về kết quả đăng nhập / đổi mật khẩu cho client.
+2. **Thu thập thông tin thiết bị**:
+   - Trích xuất địa chỉ IP thực từ `req.headers['x-forwarded-for']` hoặc `req.socket.remoteAddress`.
+   - Phân tích User-Agent để phát hiện bất thường: hệ điều hành lạ, phiên đăng nhập từ IP khác biệt đột ngột để cảnh báo người dùng.
+3. **Bảo toàn dữ liệu kiểm toán (Tamper-Proof & Retention)**:
+   - Các bản ghi trong `auth_audit_logs` chỉ cho phép quyền `INSERT` và `SELECT`, nghiêm cấm `UPDATE` hoặc `DELETE` trực tiếp để đảm bảo tính pháp lý và tính toàn vẹn của dữ liệu kiểm toán.
+   - Định kỳ có chính sách sao lưu và lưu trữ sang kho lạnh (S3 Glacier) sau 90 ngày hoặc 1 năm.

@@ -5,18 +5,21 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import appConfig from './config/app.config';
+import awsConfig from './config/aws.config';
 import databaseConfig from './config/database.config';
 import redisConfig from './config/redis.config';
 import { RedisModule } from './integrations/redis/redis.module';
+import { StorageModule } from './integrations/storage/storage.module';
 import { UserModule } from './modules/user/user.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { MediaModule } from './modules/media/media.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redisConfig],
+      load: [appConfig, awsConfig, databaseConfig, redisConfig],
       envFilePath: ['.env'],
     }),
     TypeOrmModule.forRootAsync({
@@ -35,8 +38,10 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
       }),
     }),
     RedisModule,
+    StorageModule,
     UserModule,
     AuthModule,
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [
