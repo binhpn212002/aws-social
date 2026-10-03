@@ -22,6 +22,14 @@ export default async function Layout(props: {
         leftNav={
           <>
             <li>
+              <Link
+                href="/feed"
+                className="border-none font-bold text-indigo-600 hover:text-indigo-800"
+              >
+                ⚡ Bảng tin Social
+              </Link>
+            </li>
+            <li>
               <Link href="/" className="border-none text-gray-700 hover:text-gray-900">
                 {t('home_link')}
               </Link>
