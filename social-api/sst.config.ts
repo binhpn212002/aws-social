@@ -30,16 +30,28 @@ export default $config({
       },
     });
 
-    const chatTable = new sst.aws.Dynamo("SocialChatTable", {
+    const chatConversationsTable = new sst.aws.Dynamo("ChatConversationsTable", {
       fields: {
-        PK: "string",
-        SK: "string",
+        id: "string",
       },
-      primaryIndex: { hashKey: "PK", rangeKey: "SK" },
+      primaryIndex: { hashKey: "id" },
+      transform: {
+        table: {
+          name: "social-chat-conversations",
+        },
+      },
+    });
+
+    const chatMessagesTable = new sst.aws.Dynamo("ChatMessagesTable", {
+      fields: {
+        conversationId: "string",
+        sk: "string",
+      },
+      primaryIndex: { hashKey: "conversationId", rangeKey: "sk" },
       ttl: "ttl",
       transform: {
         table: {
-          name: "social-chat-table",
+          name: "social-chat-messages",
         },
       },
     });
@@ -153,8 +165,10 @@ export default $config({
     return {
       bucketName: bucket.name,
       bucketArn: bucket.arn,
-      chatTableName: chatTable.name,
-      chatTableArn: chatTable.arn,
+      chatConversationsTableName: chatConversationsTable.name,
+      chatConversationsTableArn: chatConversationsTable.arn,
+      chatMessagesTableName: chatMessagesTable.name,
+      chatMessagesTableArn: chatMessagesTable.arn,
       auditLogTableName: auditLogTable.name,
       auditLogTableArn: auditLogTable.arn,
       websocketUrl: notificationWs.url,

@@ -71,6 +71,47 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  getClient(): Redis {
+    return this.client;
+  }
+
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.sadd(key, ...members);
+    } catch (err) {
+      this.logger.error(`Redis sadd error for key ${key}: ${(err as Error).message}`);
+      return 0;
+    }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.srem(key, ...members);
+    } catch (err) {
+      this.logger.error(`Redis srem error for key ${key}: ${(err as Error).message}`);
+      return 0;
+    }
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    try {
+      return await this.client.smembers(key);
+    } catch (err) {
+      this.logger.error(`Redis smembers error for key ${key}: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  async mget(...keys: string[]): Promise<(string | null)[]> {
+    if (!keys || keys.length === 0) return [];
+    try {
+      return await this.client.mget(...keys);
+    } catch (err) {
+      this.logger.error(`Redis mget error: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
   onModuleDestroy() {
     if (this.client) {
       this.client.disconnect();

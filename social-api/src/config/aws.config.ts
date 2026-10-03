@@ -12,6 +12,12 @@ export default registerAs('aws', () => ({
   dynamodb: {
     chatTableName:
       process.env.AWS_DYNAMODB_CHAT_TABLE_NAME || 'social-chat-table',
+    chatConversationsTableName:
+      process.env.AWS_DYNAMODB_CHAT_CONVERSATIONS_TABLE_NAME ||
+      'social-chat-conversations',
+    chatMessagesTableName:
+      process.env.AWS_DYNAMODB_CHAT_MESSAGES_TABLE_NAME ||
+      'social-chat-messages',
     auditLogTableName:
       process.env.AWS_DYNAMODB_AUDIT_LOG_TABLE_NAME || 'social-audit-logs',
     tableName: process.env.AWS_DYNAMODB_TABLE_NAME || 'social-chat-table',

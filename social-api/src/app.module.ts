@@ -18,6 +18,7 @@ import { PostModule } from './modules/post/post.module';
 import { FriendModule } from './modules/friend/friend.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -51,6 +52,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     FriendModule,
     AuditLogsModule,
     NotificationModule,
+    ChatModule,
     EventEmitterModule.forRoot(),
   ],
   controllers: [AppController],

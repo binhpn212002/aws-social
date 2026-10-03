@@ -34,6 +34,15 @@ export class UserService extends BaseService<User, UserRepository> {
     return user;
   }
 
+  async findByIds(ids: string[]): Promise<User[]> {
+    if (!ids || ids.length === 0) {
+      return [];
+    }
+    return this.repository.getRepository().createQueryBuilder('user')
+      .where('user.id IN (:...ids)', { ids })
+      .getMany();
+  }
+
   async findByEmailOrUsernameOrThrow(identifier: string): Promise<User> {
     const user = await this.repository.findByEmailOrUsername(identifier);
     if (!user) {
