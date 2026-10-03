@@ -3,9 +3,12 @@ export const TABLE_NAMES = {
   ROLES: 'roles',
   USER_ROLES: 'user_roles',
   POSTS: 'posts',
+  POST_MEDIA: 'post_media',
+  POST_LIKES: 'post_likes',
   COMMENTS: 'comments',
   LIKES: 'likes',
   FOLLOWS: 'follows',
+  FRIENDSHIPS: 'friendships',
 } as const;
 
 export const DEFAULT_PAGE_SIZE = 10;

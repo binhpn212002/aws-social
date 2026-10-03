@@ -13,6 +13,7 @@ import { StorageModule } from './integrations/storage/storage.module';
 import { UserModule } from './modules/user/user.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MediaModule } from './modules/media/media.module';
+import { PostModule } from './modules/post/post.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -42,6 +43,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     UserModule,
     AuthModule,
     MediaModule,
+    PostModule,
   ],
   controllers: [AppController],
   providers: [

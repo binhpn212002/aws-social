@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BaseService } from '../../../shared/base.service';
 import { User } from '../../../database/entities/user.entity';
 import { UserRepository } from '../repositories/user.repository';
+import { UserNotFoundException } from '../../../common/exceptions/user.exception';
 
 @Injectable()
 export class UserService extends BaseService<User, UserRepository> {
@@ -23,5 +24,21 @@ export class UserService extends BaseService<User, UserRepository> {
 
   async updateLastLogin(id: string): Promise<void> {
     await this.repository.update(id, { lastLoginAt: new Date() });
+  }
+
+  async getById(id: string): Promise<User> {
+    const user = await this.repository.findById(id);
+    if (!user) {
+      throw new UserNotFoundException();
+    }
+    return user;
+  }
+
+  async findByEmailOrUsernameOrThrow(identifier: string): Promise<User> {
+    const user = await this.repository.findByEmailOrUsername(identifier);
+    if (!user) {
+      throw new UserNotFoundException();
+    }
+    return user;
   }
 }

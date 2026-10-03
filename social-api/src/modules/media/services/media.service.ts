@@ -17,7 +17,9 @@ export class MediaService {
    * Tạo Presigned URL để client thực hiện PUT upload file trực tiếp lên S3
    */
   async generateUploadUrl(dto: GetUploadUrlDto): Promise<UploadUrlResponseDto> {
-    const folder = dto.folder ? dto.folder.replace(/^\/+|\/+$/g, '') : 'uploads';
+    const folder = dto.folder
+      ? dto.folder.replace(/^\/+|\/+$/g, '')
+      : 'uploads';
     const ext = path.extname(dto.fileName).toLowerCase();
     const baseName = path
       .basename(dto.fileName, ext)
@@ -47,12 +49,18 @@ export class MediaService {
   /**
    * Tạo Presigned URL để client tải hoặc xem file riêng tư từ S3
    */
-  async generateDownloadUrl(dto: GetDownloadUrlDto): Promise<DownloadUrlResponseDto> {
+  async generateDownloadUrl(
+    dto: GetDownloadUrlDto,
+  ): Promise<DownloadUrlResponseDto> {
     const expiresIn = dto.expiresIn || 3600; // Mặc định 1 giờ
 
-    const downloadUrl = await this.s3Service.getResignUrl(dto.key, 'getObject', {
-      expiresIn,
-    });
+    const downloadUrl = await this.s3Service.getResignUrl(
+      dto.key,
+      'getObject',
+      {
+        expiresIn,
+      },
+    );
 
     this.logger.log(`Generated download presigned URL for key: ${dto.key}`);
 

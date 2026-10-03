@@ -1,6 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, UnauthorizedException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+
+jest.mock('bcrypt');
+
+jest.mock('@nestjs/typeorm', () => ({
+  InjectRepository: () => () => {},
+  getRepositoryToken: (entity: unknown) => entity,
+}));
+
 import { AuthService } from './auth.service';
 import { UserService } from '../../user/services/user.service';
 import { TokenService } from './token.service';

@@ -3,7 +3,8 @@ import { ApiProperty } from '@nestjs/swagger';
 export class DownloadUrlResponseDto {
   @ApiProperty({
     description: 'Presigned URL để Frontend tải hoặc hiển thị file',
-    example: 'https://social-bucket-366518187546.s3.ap-southeast-1.amazonaws.com/posts/...?X-Amz-Signature=...',
+    example:
+      'https://social-bucket-366518187546.s3.ap-southeast-1.amazonaws.com/posts/...?X-Amz-Signature=...',
   })
   downloadUrl: string;
 

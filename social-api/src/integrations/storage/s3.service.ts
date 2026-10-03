@@ -23,14 +23,19 @@ export class S3Service {
   private readonly region: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.region = this.configService.get<string>('aws.s3.region', 'ap-southeast-1');
+    this.region = this.configService.get<string>(
+      'aws.s3.region',
+      'ap-southeast-1',
+    );
     this.defaultBucket = this.configService.get<string>(
       'aws.s3.bucketName',
       'social-bucket-366518187546',
     );
 
     const accessKeyId = this.configService.get<string>('aws.accessKeyId');
-    const secretAccessKey = this.configService.get<string>('aws.secretAccessKey');
+    const secretAccessKey = this.configService.get<string>(
+      'aws.secretAccessKey',
+    );
 
     this.s3Client = new S3Client({
       region: this.region,

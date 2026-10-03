@@ -11,7 +11,8 @@ export class GetUploadUrlDto {
   fileName: string;
 
   @ApiProperty({
-    description: 'Content-Type / MIME type của file (ví dụ: image/jpeg, video/mp4)',
+    description:
+      'Content-Type / MIME type của file (ví dụ: image/jpeg, video/mp4)',
     example: 'image/jpeg',
   })
   @IsString()
@@ -26,7 +27,8 @@ export class GetUploadUrlDto {
   @IsString()
   @IsOptional()
   @Matches(/^[a-zA-Z0-9_\-\/]+$/, {
-    message: 'Folder chỉ được chứa ký tự chữ, số, gạch dưới, gạch ngang và dấu gạch chéo',
+    message:
+      'Folder chỉ được chứa ký tự chữ, số, gạch dưới, gạch ngang và dấu gạch chéo',
   })
   folder?: string;
 }

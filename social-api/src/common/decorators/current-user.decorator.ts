@@ -11,6 +11,9 @@ export const CurrentUser = createParamDecorator(
     if (!user) {
       return null;
     }
+    if ((data === 'userId' || data === 'id') && !user[data] && user['sub']) {
+      return user['sub'];
+    }
     return data ? user[data] : user;
   },
 );

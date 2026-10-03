@@ -1,10 +1,4 @@
-import {
-  Injectable,
-  ConflictException,
-  UnauthorizedException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../../user/services/user.service';
 import { TokenService } from './token.service';
@@ -21,6 +15,15 @@ import {
   UserRole,
   UserStatus,
 } from '../../../database/entities/user.entity';
+import {
+  EmailAlreadyExistsException,
+  UsernameAlreadyExistsException,
+  InvalidCredentialsException,
+  UserBannedException,
+  UserInactiveException,
+  UserInactiveOrNotFoundException,
+  UserNotFoundException,
+} from '../../../common/exceptions/user.exception';
 
 @Injectable()
 export class AuthService {
@@ -34,10 +37,10 @@ export class AuthService {
       await this.userService.checkExisting(dto.email, dto.username);
 
     if (emailExists) {
-      throw new ConflictException('Email đã được sử dụng');
+      throw new EmailAlreadyExistsException();
     }
     if (usernameExists) {
-      throw new ConflictException('Username đã được sử dụng');
+      throw new UsernameAlreadyExistsException();
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -65,19 +68,19 @@ export class AuthService {
     );
 
     if (!user) {
-      throw new UnauthorizedException('Thông tin đăng nhập không chính xác');
+      throw new InvalidCredentialsException();
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.password);
     if (!isMatch) {
-      throw new UnauthorizedException('Thông tin đăng nhập không chính xác');
+      throw new InvalidCredentialsException();
     }
 
     if (user.status === UserStatus.BANNED) {
-      throw new ForbiddenException('Tài khoản của bạn đã bị khóa');
+      throw new UserBannedException();
     }
     if (user.status === UserStatus.INACTIVE) {
-      throw new ForbiddenException('Tài khoản chưa được kích hoạt');
+      throw new UserInactiveException();
     }
 
     await this.userService.updateLastLogin(user.id);
@@ -96,9 +99,7 @@ export class AuthService {
 
     const user = await this.userService.findById(payload.sub);
     if (!user || user.status !== UserStatus.ACTIVE) {
-      throw new UnauthorizedException(
-        'User does not exist or is no longer active',
-      );
+      throw new UserInactiveOrNotFoundException();
     }
 
     return this.tokenService.generateTokens(user);
@@ -112,7 +113,7 @@ export class AuthService {
   async getMe(userId: string): Promise<UserProfileDto> {
     const user = await this.userService.findById(userId);
     if (!user) {
-      throw new NotFoundException('Không tìm thấy thông tin người dùng');
+      throw new UserNotFoundException();
     }
 
     return this.mapToUserProfile(user);
