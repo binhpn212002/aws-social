@@ -18,6 +18,7 @@ import {
   ApiBearerAuth,
   ApiParam,
 } from '@nestjs/swagger';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PostService } from './services/post.service';
 import { PostLikeService } from './services/post-like.service';
@@ -73,11 +74,12 @@ export class PostController {
     return this.postService.createPost(userId, dto);
   }
 
+  @Public()
   @Get('feed')
   @ApiOperation({
-    summary: '3. Lấy News Feed bài viết theo Cursor Pagination',
+    summary: '3. Lấy News Feed bài viết theo Cursor Pagination (không bắt buộc đăng nhập)',
     description:
-      'Lấy danh sách bài viết trang chủ theo thuật toán quyền riêng tư (PUBLIC, FRIENDS, bài viết của người xem) và phân trang bằng cursor.',
+      'Lấy danh sách bài viết trang chủ theo thuật toán quyền riêng tư (PUBLIC khi chưa đăng nhập, hoặc kèm FRIENDS và bài viết chính chủ khi đã đăng nhập).',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -85,7 +87,7 @@ export class PostController {
     type: FeedResponseDto,
   })
   async getFeed(
-    @CurrentUser('userId') userId: string,
+    @CurrentUser('userId') userId: string | null,
     @Query() query: GetFeedQueryDto,
   ): Promise<FeedResponseDto> {
     return this.postService.getNewsFeed(userId, query);
@@ -109,8 +111,9 @@ export class PostController {
     return this.postService.getUserTimeline(targetUserId, viewerId, query);
   }
 
+  @Public()
   @Get(':id')
-  @ApiOperation({ summary: '5. Xem chi tiết bài viết' })
+  @ApiOperation({ summary: '5. Xem chi tiết bài viết (PUBLIC không bắt buộc đăng nhập)' })
   @ApiParam({ name: 'id', description: 'UUID của bài viết' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -119,7 +122,7 @@ export class PostController {
   })
   async getPostById(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser('userId') viewerId: string,
+    @CurrentUser('userId') viewerId: string | null,
   ): Promise<PostResponseDto> {
     return this.postService.getPostById(id, viewerId);
   }

@@ -398,6 +398,10 @@ export default function FriendsPage() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const loadData = async () => {
+    if (!api.getToken()) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const [friendsRes, receivedRes, sentRes] = await Promise.all([

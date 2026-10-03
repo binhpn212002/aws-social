@@ -1,17 +1,13 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
-// Default seeded user credentials for seamless demo/testing
-const DEFAULT_USER = {
-  identifier: 'alex_dev',
-  password: 'Password123@',
-};
-
 export type ApiPostAuthor = {
   id: string;
   username: string;
   fullName: string;
   avatarUrl?: string | null;
+  bio?: string | null;
+  role?: string;
 };
 
 export type ApiPost = {
@@ -23,11 +19,11 @@ export type ApiPost = {
   commentsCount: number;
   sharesCount: number;
   isLiked: boolean;
-  media?: Array<{
+  media?: {
     id: string;
     mediaUrl: string;
     mediaType: string;
-  }>;
+  }[];
   createdAt: string;
   updatedAt: string;
 };
@@ -55,7 +51,6 @@ export type ApiFriendRequest = {
 
 class ApiService {
   private token: string | null = null;
-  private isAuthenticating: Promise<string | null> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -74,52 +69,37 @@ class ApiService {
     }
   }
 
-  public async getToken(): Promise<string | null> {
+  public getToken(): string | null {
     if (this.token) {
       return this.token;
     }
-
-    // Auto-bootstrap login with seeded user if token not found
-    if (!this.isAuthenticating) {
-      this.isAuthenticating = this.autoLogin();
-    }
-    return this.isAuthenticating;
-  }
-
-  private async autoLogin(): Promise<string | null> {
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(DEFAULT_USER),
-      });
-
-      if (!res.ok) {
-        return null;
-      }
-
-      const json = await res.json();
-      const accessToken = json.data?.tokens?.accessToken;
-      if (accessToken) {
-        this.setToken(accessToken);
-        return accessToken;
-      }
+    if (typeof window === 'undefined') {
       return null;
-    } catch {
-      return null;
-    } finally {
-      this.isAuthenticating = null;
     }
+    const stored = localStorage.getItem('social_access_token');
+    if (stored) {
+      this.token = stored;
+      return stored;
+    }
+    return null;
   }
 
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
+    requireAuth = true,
   ): Promise<T> {
-    const token = await this.getToken();
+    const token = requireAuth
+      ? this.getToken()
+      : this.token || (typeof window === 'undefined' ? null : localStorage.getItem('social_access_token'));
+
+    if (requireAuth && !token) {
+      throw new Error('Vui lòng đăng nhập để tiếp tục.');
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
+      ...(options.headers as Record<string, string>),
     };
 
     if (token) {
@@ -133,14 +113,24 @@ class ApiService {
     });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        this.setToken(null);
+      }
+
       const errorJson = await res.json().catch(() => ({}));
-      throw new Error(
-        errorJson.message || `API Error: ${res.status} ${res.statusText}`,
-      );
+      let msg = `Lỗi hệ thống (${res.status})`;
+      if (typeof errorJson.message === 'string') {
+        msg = errorJson.message;
+      } else if (Array.isArray(errorJson.message)) {
+        msg = errorJson.message.join(', ');
+      }
+
+      const details = Array.isArray(errorJson.details) ? `: ${errorJson.details.join(', ')}` : '';
+      throw new Error(`${msg}${details}`);
     }
 
     const json = await res.json();
-    return json.data !== undefined ? json.data : json;
+    return json.data === undefined ? json : json.data;
   }
 
   // ------------------------------------
@@ -153,7 +143,7 @@ class ApiService {
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ identifier, password }),
-    });
+    }, false);
 
     if (data.tokens?.accessToken) {
       this.setToken(data.tokens.accessToken);
@@ -161,8 +151,40 @@ class ApiService {
     return data;
   }
 
+  async register(payload: {
+    fullName: string;
+    username: string;
+    email: string;
+    password: string;
+  }) {
+    const data = await this.request<{
+      user: ApiPostAuthor;
+      tokens: { accessToken: string; refreshToken: string };
+    }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, false);
+
+    if (data.tokens?.accessToken) {
+      this.setToken(data.tokens.accessToken);
+    }
+    return data;
+  }
+
+  async logout() {
+    try {
+      await this.request<{ message: string }>('/auth/logout', {
+        method: 'POST',
+      }, true);
+    } catch {
+      // Ignore network error on logout
+    } finally {
+      this.setToken(null);
+    }
+  }
+
   async getMe() {
-    return this.request<ApiPostAuthor>('/auth/me');
+    return await this.request<ApiPostAuthor>('/auth/me', {}, true);
   }
 
   // ------------------------------------
@@ -173,24 +195,28 @@ class ApiService {
     if (beforeTimestamp) {
       params.append('beforeTimestamp', beforeTimestamp);
     }
-    return this.request<{
+    return await this.request<{
       items: ApiPost[];
       pagination: {
         nextCursor: string | null;
         hasMore: boolean;
       };
-    }>(`/posts/feed?${params.toString()}`);
+    }>(`/posts/feed?${params.toString()}`, {}, false); // Không yêu cầu đăng nhập
+  }
+
+  async getPostById(postId: string) {
+    return await this.request<ApiPost>(`/posts/${postId}`, {}, false); // Không yêu cầu đăng nhập
   }
 
   async createPost(content: string, privacy: 'PUBLIC' | 'FRIENDS' | 'PRIVATE' = 'PUBLIC') {
-    return this.request<ApiPost>('/posts', {
+    return await this.request<ApiPost>('/posts', {
       method: 'POST',
       body: JSON.stringify({ content, privacy }),
     });
   }
 
   async toggleLike(postId: string) {
-    return this.request<{
+    return await this.request<{
       liked: boolean;
       likesCount: number;
     }>(`/posts/${postId}/like`, {
@@ -199,7 +225,7 @@ class ApiService {
   }
 
   async getUserPosts(userId: string, limit = 20) {
-    return this.request<{
+    return await this.request<{
       items: ApiPost[];
       pagination: {
         nextCursor: string | null;
@@ -219,7 +245,7 @@ class ApiService {
     if (search) {
       params.append('search', search);
     }
-    return this.request<{
+    return await this.request<{
       items: ApiFriend[];
       meta: {
         totalItems: number;
@@ -231,7 +257,7 @@ class ApiService {
   }
 
   async getFriendRequests(type: 'received' | 'sent' = 'received') {
-    return this.request<{
+    return await this.request<{
       items: ApiFriendRequest[];
       meta: {
         totalItems: number;
@@ -243,32 +269,32 @@ class ApiService {
   }
 
   async acceptFriendRequest(requestId: string) {
-    return this.request(`/friends/requests/${requestId}/accept`, {
+    return await this.request(`/friends/requests/${requestId}/accept`, {
       method: 'PATCH',
     });
   }
 
   async declineFriendRequest(requestId: string) {
-    return this.request(`/friends/requests/${requestId}/decline`, {
+    return await this.request(`/friends/requests/${requestId}/decline`, {
       method: 'PATCH',
     });
   }
 
   async cancelFriendRequest(requestId: string) {
-    return this.request(`/friends/requests/${requestId}/cancel`, {
+    return await this.request(`/friends/requests/${requestId}/cancel`, {
       method: 'DELETE',
     });
   }
 
   async sendFriendRequest(addresseeId: string) {
-    return this.request('/friends/requests', {
+    return await this.request('/friends/requests', {
       method: 'POST',
       body: JSON.stringify({ addresseeId }),
     });
   }
 
   async unfriend(friendUserId: string) {
-    return this.request(`/friends/${friendUserId}`, {
+    return await this.request(`/friends/${friendUserId}`, {
       method: 'DELETE',
     });
   }
@@ -277,8 +303,8 @@ class ApiService {
   // CHAT
   // ------------------------------------
   async getConversations() {
-    return this.request<{
-      items: Array<{
+    return await this.request<{
+      items: {
         id: string;
         type: 'DIRECT' | 'GROUP';
         name?: string;
@@ -292,13 +318,13 @@ class ApiService {
           sender: ApiPostAuthor;
         };
         unreadCount: number;
-      }>;
+      }[];
     }>('/chat/conversations');
   }
 
   async getMessages(conversationId: string, limit = 50) {
-    return this.request<{
-      items: Array<{
+    return await this.request<{
+      items: {
         id: string;
         conversationId: string;
         senderId: string;
@@ -306,12 +332,12 @@ class ApiService {
         type: string;
         createdAt: string;
         sender?: ApiPostAuthor;
-      }>;
+      }[];
     }>(`/chat/conversations/${conversationId}/messages?limit=${limit}`);
   }
 
   async sendMessage(conversationId: string, content: string) {
-    return this.request(`/chat/conversations/${conversationId}/messages`, {
+    return await this.request(`/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       body: JSON.stringify({
         conversationId,

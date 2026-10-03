@@ -9,7 +9,7 @@ import {
 } from '../../../database/entities/post.entity';
 
 export interface FeedQueryOptions {
-  viewerId: string;
+  viewerId?: string;
   friendIds: string[];
   limit: number;
   cursorCreatedAt?: Date;
@@ -46,27 +46,35 @@ export class PostRepository extends BaseRepository<Post> {
     const qb = this.createPostBaseQuery();
 
     // Điều kiện hiển thị quyền riêng tư (Privacy filtering):
-    // 1. Bài của chính mình (viewerId)
-    // 2. Hoặc bài viết công khai (PUBLIC)
-    // 3. Hoặc bài viết dành cho bạn bè (FRIENDS) mà author nằm trong danh sách bạn bè
-    if (friendIds && friendIds.length > 0) {
-      qb.andWhere(
-        '(post.userId = :viewerId OR post.privacy = :publicPrivacy OR (post.privacy = :friendsPrivacy AND post.userId IN (:...friendIds)))',
-        {
-          viewerId,
-          publicPrivacy: PostPrivacy.PUBLIC,
-          friendsPrivacy: PostPrivacy.FRIENDS,
-          friendIds,
-        },
-      );
+    // 1. Khi chưa đăng nhập (viewerId không có): Chỉ lấy bài viết công khai (PUBLIC)
+    // 2. Khi đã đăng nhập:
+    //    - Bài của chính mình (viewerId)
+    //    - Hoặc bài viết công khai (PUBLIC)
+    //    - Hoặc bài viết dành cho bạn bè (FRIENDS) mà author nằm trong danh sách bạn bè
+    if (viewerId) {
+      if (friendIds && friendIds.length > 0) {
+        qb.andWhere(
+          '(post.userId = :viewerId OR post.privacy = :publicPrivacy OR (post.privacy = :friendsPrivacy AND post.userId IN (:...friendIds)))',
+          {
+            viewerId,
+            publicPrivacy: PostPrivacy.PUBLIC,
+            friendsPrivacy: PostPrivacy.FRIENDS,
+            friendIds,
+          },
+        );
+      } else {
+        qb.andWhere(
+          '(post.userId = :viewerId OR post.privacy = :publicPrivacy)',
+          {
+            viewerId,
+            publicPrivacy: PostPrivacy.PUBLIC,
+          },
+        );
+      }
     } else {
-      qb.andWhere(
-        '(post.userId = :viewerId OR post.privacy = :publicPrivacy)',
-        {
-          viewerId,
-          publicPrivacy: PostPrivacy.PUBLIC,
-        },
-      );
+      qb.andWhere('post.privacy = :publicPrivacy', {
+        publicPrivacy: PostPrivacy.PUBLIC,
+      });
     }
 
     // Áp dụng Cursor Pagination dựa trên cặp khóa (createdAt, id)

@@ -10,13 +10,6 @@ const handleI18nRouting = createMiddleware(routing);
 
 const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/:locale/dashboard(.*)']);
 
-const isAuthPage = createRouteMatcher([
-  '/sign-in(.*)',
-  '/:locale/sign-in(.*)',
-  '/sign-up(.*)',
-  '/:locale/sign-up(.*)',
-]);
-
 // Improve security with Arcjet
 const aj = arcjet.withRule(
   detectBot({
@@ -42,8 +35,8 @@ export default async function proxy(request: NextRequest, event: NextFetchEvent)
     }
   }
 
-  // Clerk keyless mode doesn't work with i18n, this is why we need to run the middleware conditionally
-  if (isAuthPage(request) || isProtectedRoute(request)) {
+  // Custom auth for social app: only run Clerk for dashboard protected route
+  if (isProtectedRoute(request)) {
     // Match Clerk's documented middleware composition pattern, `return await` is not necessary.
     // oxlint-disable-next-line typescript/return-await
     return clerkMiddleware(async (auth, req) => {

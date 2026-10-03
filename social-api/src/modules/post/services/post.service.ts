@@ -144,20 +144,20 @@ export class PostService extends BaseService<Post, PostRepository> {
   }
 
   /**
-   * 3. Lấy News Feed theo Cursor Pagination & Quyền riêng tư
+   * 3. Lấy News Feed theo Cursor Pagination & Quyền riêng tư (hỗ trợ cả khách vãng lai chưa đăng nhập)
    */
   async getNewsFeed(
-    userId: string,
+    userId: string | null | undefined,
     query: GetFeedQueryDto,
   ): Promise<FeedResponseDto> {
     const limit = query.limit || 10;
     const { cursorCreatedAt, cursorId } = this.decodeCursor(query.cursor);
 
-    // Lấy danh sách ID bạn bè
-    const friendIds = await this.getFriendUserIds(userId);
+    // Lấy danh sách ID bạn bè nếu đã đăng nhập
+    const friendIds = userId ? await this.getFriendUserIds(userId) : [];
 
     const posts = await this.repository.findNewsFeed({
-      viewerId: userId,
+      viewerId: userId || undefined,
       friendIds,
       limit,
       cursorCreatedAt,
@@ -167,12 +167,11 @@ export class PostService extends BaseService<Post, PostRepository> {
     const hasMore = posts.length > limit;
     const itemsToReturn = hasMore ? posts.slice(0, limit) : posts;
 
-    // Kiểm tra trạng thái isLiked của các bài viết với viewer
+    // Kiểm tra trạng thái isLiked của các bài viết với viewer (nếu có userId)
     const postIds = itemsToReturn.map((p) => p.id);
-    const likedSet = await this.postLikeRepository.getLikedPostIds(
-      postIds,
-      userId,
-    );
+    const likedSet = userId
+      ? await this.postLikeRepository.getLikedPostIds(postIds, userId)
+      : new Set<string>();
 
     const mappedItems = itemsToReturn.map((post) =>
       this.mapToPostResponseDto(post, likedSet.has(post.id)),
@@ -198,7 +197,7 @@ export class PostService extends BaseService<Post, PostRepository> {
    */
   async getPostById(
     postId: string,
-    viewerId: string,
+    viewerId: string | null | undefined,
   ): Promise<PostResponseDto> {
     const post = await this.repository.findPostByIdWithDetails(postId);
     if (!post) {
@@ -208,10 +207,9 @@ export class PostService extends BaseService<Post, PostRepository> {
     // Kiểm tra quyền xem bài viết
     await this.validateViewerAccess(post, viewerId);
 
-    const isLiked = !!(await this.postLikeRepository.findByPostAndUser(
-      postId,
-      viewerId,
-    ));
+    const isLiked = viewerId
+      ? !!(await this.postLikeRepository.findByPostAndUser(postId, viewerId))
+      : false;
     return this.mapToPostResponseDto(post, isLiked);
   }
 
@@ -322,11 +320,15 @@ export class PostService extends BaseService<Post, PostRepository> {
 
   private async validateViewerAccess(
     post: Post,
-    viewerId: string,
+    viewerId?: string | null,
   ): Promise<void> {
-    if (post.userId === viewerId) return; // Chính chủ luôn có quyền xem
+    if (viewerId && post.userId === viewerId) return; // Chính chủ luôn có quyền xem
 
     if (post.privacy === PostPrivacy.PUBLIC) return;
+
+    if (!viewerId) {
+      throw new PostForbiddenException('Vui lòng đăng nhập để xem bài viết này');
+    }
 
     if (post.privacy === PostPrivacy.PRIVATE) {
       throw new PostForbiddenException('Bài viết này đang ở chế độ riêng tư');

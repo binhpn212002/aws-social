@@ -1,9 +1,11 @@
 'use client';
 
 import { Calendar, Clock, MessageCircle, PlusCircle } from 'lucide-react';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { Link } from '@/libs/I18nNavigation';
-import { api, type ApiFriend } from '@/services/api';
+import { api } from '@/services/api';
+import type { ApiFriend } from '@/services/api';
 
 type SocialRightSidebarProps = {
   onOpenChatWithUser?: (userId: string, userName: string) => void;
@@ -13,13 +15,24 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
   const [friends, setFriends] = useState<ApiFriend[]>([]);
 
   useEffect(() => {
-    api.getFriends()
-      .then((res) => {
-        if (res.items && res.items.length > 0) {
+    let isMounted = true;
+    const fetchFriends = async () => {
+      if (!api.getToken()) {
+        return;
+      }
+      try {
+        const res = await api.getFriends();
+        if (isMounted && res.items && res.items.length > 0) {
           setFriends(res.items);
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Fallback gracefully without unhandled errors
+      }
+    };
+    void fetchFriends();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Fallback default friends if API is still loading
@@ -96,17 +109,20 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
 
         <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800/60">
           {displayFriends.map((friend) => (
-            <div
+            <button
               key={friend.id}
-              className="group flex cursor-pointer items-center justify-between gap-2 py-2"
+              type="button"
+              className="group flex w-full cursor-pointer items-center justify-between gap-2 py-2 text-left"
               onClick={() => onOpenChatWithUser?.(friend.id, friend.name)}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <div className="relative shrink-0">
-                  {/* oxlint-disable-next-line next(no-img-element) */}
-                  <img
+                  <Image
                     src={friend.avatar}
                     alt={friend.name}
+                    width={36}
+                    height={36}
+                    unoptimized
                     className="h-9 w-9 rounded-full object-cover ring-2 ring-slate-100 dark:ring-slate-800"
                   />
                   {friend.isOnline && (
@@ -121,14 +137,13 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
                 </div>
               </div>
 
-              <button
-                type="button"
+              <div
                 title="Nhắn tin nhanh"
-                className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
+                className="shrink-0 rounded-full p-1.5 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 dark:group-hover:bg-indigo-950/40 dark:group-hover:text-indigo-400"
               >
                 <MessageCircle className="h-4 w-4" />
-              </button>
-            </div>
+              </div>
+            </button>
           ))}
         </div>
       </div>
@@ -177,10 +192,10 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
       {/* Mini Footer */}
       <div className="space-y-2 px-2 text-[11px] text-slate-400 dark:text-slate-500">
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <a href="#" className="hover:underline">Điều khoản</a>
-          <a href="#" className="hover:underline">Chính sách bảo mật</a>
-          <a href="#" className="hover:underline">Hỗ trợ</a>
-          <a href="#" className="hover:underline">API Docs</a>
+          <Link href="/about" className="hover:underline">Điều khoản</Link>
+          <Link href="/about" className="hover:underline">Chính sách bảo mật</Link>
+          <Link href="/about" className="hover:underline">Hỗ trợ</Link>
+          <Link href="/about" className="hover:underline">API Docs</Link>
         </div>
         <p>© 2026 AWS Social Network · Powered by AWS CDK & Next.js</p>
       </div>
