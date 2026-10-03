@@ -19,7 +19,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:watch": "jest --watch",
     "sst:dev": "sst dev",
-    "sst:deploy": "sst deploy"
+    "sst:deploy": "sst deploy",
+    "seed:ui": "ts-node src/database/seeds/seed-ui-data.ts"
   },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.1145.0",

@@ -1,46 +1,60 @@
 'use client';
 
 import { Calendar, Clock, MessageCircle, PlusCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link } from '@/libs/I18nNavigation';
+import { api, type ApiFriend } from '@/services/api';
 
 type SocialRightSidebarProps = {
   onOpenChatWithUser?: (userId: string, userName: string) => void;
 };
 
 export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenChatWithUser }) => {
-  // Mock active friends
-  const activeFriends = [
-    {
-      id: 'usr_1',
-      name: 'Nguyễn Thảo Nhi',
-      role: 'DevOps Engineer',
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
-      isOnline: true,
-    },
-    {
-      id: 'usr_2',
-      name: 'Trần Quang Huy',
-      role: 'Solutions Architect',
-      avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-      isOnline: true,
-    },
-    {
-      id: 'usr_3',
-      name: 'Lê Mai Hương',
-      role: 'UI/UX Designer',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
-      isOnline: true,
-    },
-    {
-      id: 'usr_4',
-      name: 'Vũ Quốc Bảo',
-      role: 'Backend Node.js Dev',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
-      isOnline: false,
-    },
-  ];
+  const [friends, setFriends] = useState<ApiFriend[]>([]);
 
-  // Mock upcoming scheduled notifications (Module notification/schedules)
+  useEffect(() => {
+    api.getFriends()
+      .then((res) => {
+        if (res.items && res.items.length > 0) {
+          setFriends(res.items);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Fallback default friends if API is still loading
+  const displayFriends = friends.length > 0
+    ? friends.map((f) => ({
+        id: f.id,
+        name: f.fullName,
+        role: `@${f.username}`,
+        avatar: f.avatarUrl || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
+        isOnline: true,
+      }))
+    : [
+        {
+          id: 'usr_1',
+          name: 'Nguyễn Thảo Nhi',
+          role: 'DevOps Engineer',
+          avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
+          isOnline: true,
+        },
+        {
+          id: 'usr_2',
+          name: 'Trần Quang Huy',
+          role: 'Solutions Architect',
+          avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+          isOnline: true,
+        },
+        {
+          id: 'usr_3',
+          name: 'Lê Mai Hương',
+          role: 'UI/UX Designer',
+          avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+          isOnline: true,
+        },
+      ];
+
   const upcomingSchedules = [
     {
       id: 'sch_1',
@@ -69,11 +83,11 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
             </span>
             <h3 className="text-xs font-bold tracking-wider text-slate-900 uppercase dark:text-white">
-              Bạn bè trực tuyến
+              Bạn bè trực tuyến ({displayFriends.length})
             </h3>
           </div>
           <Link
-            href="/friends/list"
+            href="/friends"
             className="text-[11px] font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
           >
             Tất cả
@@ -81,14 +95,15 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
         </div>
 
         <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800/60">
-          {activeFriends.map((friend) => (
+          {displayFriends.map((friend) => (
             <div
               key={friend.id}
-              className="group flex cursor-pointer items-center justify-between py-2"
+              className="group flex cursor-pointer items-center justify-between gap-2 py-2"
               onClick={() => onOpenChatWithUser?.(friend.id, friend.name)}
             >
-              <div className="flex items-center gap-2.5">
-                <div className="relative">
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                <div className="relative shrink-0">
+                  {/* oxlint-disable-next-line next(no-img-element) */}
                   <img
                     src={friend.avatar}
                     alt={friend.name}
@@ -98,7 +113,7 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
                     <span className="absolute right-0 bottom-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
                   )}
                 </div>
-                <div className="overflow-hidden">
+                <div className="min-w-0 flex-1 overflow-hidden">
                   <p className="truncate text-xs font-semibold text-slate-800 group-hover:text-indigo-600 dark:text-slate-200 dark:group-hover:text-indigo-400">
                     {friend.name}
                   </p>
@@ -107,8 +122,9 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
               </div>
 
               <button
+                type="button"
                 title="Nhắn tin nhanh"
-                className="rounded-full p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
+                className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
               >
                 <MessageCircle className="h-4 w-4" />
               </button>
@@ -117,7 +133,7 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
         </div>
       </div>
 
-      {/* Upcoming Scheduled Reminders (from AWS Scheduled Notifications) */}
+      {/* Upcoming Scheduled Reminders */}
       <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 shadow-sm backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-900/70">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-slate-900 uppercase dark:text-white">
@@ -161,18 +177,10 @@ export const SocialRightSidebar: React.FC<SocialRightSidebarProps> = ({ onOpenCh
       {/* Mini Footer */}
       <div className="space-y-2 px-2 text-[11px] text-slate-400 dark:text-slate-500">
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <a href="#" className="hover:underline">
-            Điều khoản
-          </a>
-          <a href="#" className="hover:underline">
-            Chính sách bảo mật
-          </a>
-          <a href="#" className="hover:underline">
-            Hỗ trợ
-          </a>
-          <a href="#" className="hover:underline">
-            API Docs
-          </a>
+          <a href="#" className="hover:underline">Điều khoản</a>
+          <a href="#" className="hover:underline">Chính sách bảo mật</a>
+          <a href="#" className="hover:underline">Hỗ trợ</a>
+          <a href="#" className="hover:underline">API Docs</a>
         </div>
         <p>© 2026 AWS Social Network · Powered by AWS CDK & Next.js</p>
       </div>

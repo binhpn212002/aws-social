@@ -33,7 +33,7 @@ import { FriendshipStatusResponseDto } from './dto/friendship-status-response.dt
 
 @ApiTags('Friends')
 @ApiBearerAuth()
-@Controller('api/v1/friends')
+@Controller('friends')
 export class FriendController {
   constructor(private readonly friendService: FriendService) {}
 
