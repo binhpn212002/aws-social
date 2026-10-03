@@ -55,6 +55,19 @@ export class TokenService {
       this.refreshTokenExpiresIn,
     );
 
+    // Save user profile to Redis for fast WebSocket and Lambda message sender lookup
+    await this.redisService.set(
+      `user:profile:${user.id}`,
+      JSON.stringify({
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl || null,
+        status: user.status,
+      }),
+      this.refreshTokenExpiresIn,
+    );
+
     return {
       accessToken,
       refreshToken,

@@ -8,6 +8,7 @@ export type ApiPostAuthor = {
   avatarUrl?: string | null;
   bio?: string | null;
   role?: string;
+  status?: string;
 };
 
 export type ApiPost = {
@@ -302,47 +303,46 @@ class ApiService {
   // ------------------------------------
   // CHAT
   // ------------------------------------
+  async createConversation(data: {
+    type: 'DIRECT' | 'GROUP';
+    recipientId?: string;
+    name?: string;
+    avatarUrl?: string;
+    memberIds?: string[];
+  }) {
+    return await this.request<ApiConversation>('/chat/conversations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async getConversations() {
     return await this.request<{
-      items: {
-        id: string;
-        type: 'DIRECT' | 'GROUP';
-        name?: string;
-        avatarUrl?: string;
-        members: ApiPostAuthor[];
-        lastMessage?: {
-          id: string;
-          content: string;
-          type: string;
-          createdAt: string;
-          sender: ApiPostAuthor;
-        };
-        unreadCount: number;
-      }[];
+      items: ApiConversation[];
+      nextCursor?: string | null;
     }>('/chat/conversations');
   }
 
   async getMessages(conversationId: string, limit = 50) {
     return await this.request<{
-      items: {
-        id: string;
-        conversationId: string;
-        senderId: string;
-        content: string;
-        type: string;
-        createdAt: string;
-        sender?: ApiPostAuthor;
-      }[];
+      items: ApiChatMessage[];
+      nextCursor?: string | null;
     }>(`/chat/conversations/${conversationId}/messages?limit=${limit}`);
   }
 
   async sendMessage(conversationId: string, content: string) {
-    return await this.request(`/chat/conversations/${conversationId}/messages`, {
+    return await this.request<ApiChatMessage>(`/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       body: JSON.stringify({
         conversationId,
         content,
       }),
+    });
+  }
+
+  async markConversationAsRead(conversationId: string) {
+    return await this.request(`/chat/conversations/${conversationId}/read`, {
+      method: 'PATCH',
     });
   }
   // ------------------------------------
@@ -396,6 +396,37 @@ export interface ApiNotificationsResponse {
     pageSize: number;
     totalPages: number;
   };
+}
+
+export interface ApiConversation {
+  id: string;
+  type: 'DIRECT' | 'GROUP';
+  name?: string;
+  avatarUrl?: string;
+  members: ApiPostAuthor[];
+  lastMessage?: {
+    id: string;
+    content: string;
+    type: string;
+    createdAt: string;
+    sender: ApiPostAuthor;
+  };
+  unreadCount: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ApiChatMessage {
+  id: string;
+  conversationId: string;
+  senderId?: string;
+  userId?: string;
+  type: string;
+  content: string;
+  mediaUrls?: string[];
+  isRecalled?: boolean;
+  createdAt: string;
+  sender?: ApiPostAuthor;
 }
 
 export const api = new ApiService();

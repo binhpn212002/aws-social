@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/services/api';
 import type { ApiPost } from '@/services/api';
 
@@ -58,13 +59,22 @@ type QuickPostBoxProps = {
 };
 
 function QuickPostBox({ text, onChangeText, onSubmit, isSubmitting }: QuickPostBoxProps) {
+  const { user } = useAuth();
+  const avatarUrl =
+    user?.avatarUrl ||
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150';
+
+  const placeholder = user
+    ? `${user.fullName || user.username} ơi, bạn đang nghĩ gì thế? Hãy chia sẻ với cộng đồng...`
+    : 'Bạn đang có ý tưởng gì mới hôm nay? Hãy chia sẻ với cộng đồng...';
+
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur-md transition-shadow hover:shadow-md dark:border-slate-800/80 dark:bg-slate-900/80">
       <form onSubmit={onSubmit}>
         <div className="flex items-center gap-3">
           <Image
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
-            alt="Avatar"
+            src={avatarUrl}
+            alt={user?.fullName || 'Avatar'}
             width={40}
             height={40}
             unoptimized
@@ -74,7 +84,7 @@ function QuickPostBox({ text, onChangeText, onSubmit, isSubmitting }: QuickPostB
             type="text"
             value={text}
             onChange={(e) => onChangeText(e.target.value)}
-            placeholder="Bạn đang có ý tưởng gì mới hôm nay? Hãy chia sẻ với cộng đồng..."
+            placeholder={placeholder}
             className="flex-1 rounded-full border border-slate-200 bg-slate-50/80 px-4 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:outline-none sm:text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
         </div>

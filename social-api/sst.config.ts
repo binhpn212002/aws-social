@@ -101,17 +101,52 @@ export default $config({
       },
     });
 
+    const wsRoutePermissions = [
+      {
+        actions: ["execute-api:ManageConnections"],
+        resources: ["*"],
+      },
+      {
+        actions: [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchWriteItem",
+        ],
+        resources: [
+          chatConversationsTable.arn,
+          chatMessagesTable.arn,
+        ],
+      },
+    ];
+
+    const wsRouteEnvironment = {
+      WEBSOCKET_ENDPOINT: notificationWs.managementEndpoint,
+      REDIS_HOST: process.env.REDIS_HOST || "116.118.3.84",
+      REDIS_PORT: process.env.REDIS_PORT || "6379",
+      REDIS_PASSWORD: process.env.REDIS_PASSWORD || "",
+      CHAT_CONVERSATIONS_TABLE: chatConversationsTable.name,
+      CHAT_MESSAGES_TABLE: chatMessagesTable.name,
+    };
+
     notificationWs.route("$default", {
       handler: "infra/lambda-handler/websocket/default.handler",
-      environment: {
-        WEBSOCKET_ENDPOINT: notificationWs.managementEndpoint,
-      },
-      permissions: [
-        {
-          actions: ["execute-api:ManageConnections"],
-          resources: ["*"],
-        },
-      ],
+      environment: wsRouteEnvironment,
+      permissions: wsRoutePermissions,
+    });
+
+    notificationWs.route("joinRoom", {
+      handler: "infra/lambda-handler/websocket/default.handler",
+      environment: wsRouteEnvironment,
+      permissions: wsRoutePermissions,
+    });
+
+    notificationWs.route("sendMessage", {
+      handler: "infra/lambda-handler/websocket/default.handler",
+      environment: wsRouteEnvironment,
+      permissions: wsRoutePermissions,
     });
 
     const notificationDlq = new sst.aws.Queue("NotificationDLQ", {

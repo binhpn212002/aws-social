@@ -17,6 +17,16 @@ export const handler = async (event: APIGatewayProxyEvent) => {
       );
     }
     pipeline.del(`ws:conn:${connectionId}:user`);
+
+    // Dọn dẹp phòng chat connection đã tham gia
+    const joinedRooms = await redis.smembers(`ws:conn:${connectionId}:rooms`);
+    if (joinedRooms && joinedRooms.length > 0) {
+      for (const roomId of joinedRooms) {
+        pipeline.srem(`ws:room:${roomId}:connections`, connectionId!);
+      }
+    }
+    pipeline.del(`ws:conn:${connectionId}:rooms`);
+
     await pipeline.exec();
 
     return { statusCode: 200, body: 'Disconnected successfully' };

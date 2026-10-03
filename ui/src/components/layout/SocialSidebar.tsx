@@ -10,10 +10,13 @@ import {
   TrendingUp,
   Users,
 } from 'lucide-react';
+import Image from 'next/image';
+import { useAuth } from '@/contexts/AuthContext';
 import { Link, usePathname } from '@/libs/I18nNavigation';
 
 export const SocialSidebar: React.FC = () => {
   const pathname = usePathname();
+  const { user, isAuthenticated } = useAuth();
 
   const mainNavigation = [
     {
@@ -77,22 +80,44 @@ export const SocialSidebar: React.FC = () => {
     <aside className="sticky top-20 hidden w-64 shrink-0 space-y-6 lg:block">
       {/* Quick Profile Overview Card */}
       <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 shadow-sm backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-900/70">
-        <Link href="/profile/me" className="group flex items-center gap-3">
-          <div className="relative">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
-              alt="Avatar"
-              className="h-11 w-11 rounded-full object-cover ring-2 ring-indigo-500/40 transition group-hover:scale-105"
-            />
-            <span className="absolute right-0 bottom-0 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
-          </div>
-          <div className="overflow-hidden">
-            <h3 className="truncate text-sm font-bold text-slate-900 transition group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400">
-              Alex Johnson
-            </h3>
-            <p className="truncate text-xs text-slate-500">Cloud & Fullstack Dev</p>
-          </div>
-        </Link>
+        {isAuthenticated && user ? (
+          <Link href={`/profile/${user.id}`} className="group flex items-center gap-3">
+            <div className="relative shrink-0">
+              <Image
+                src={
+                  user.avatarUrl ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+                }
+                alt={user.fullName}
+                width={44}
+                height={44}
+                unoptimized
+                className="h-11 w-11 rounded-full object-cover ring-2 ring-indigo-500/40 transition group-hover:scale-105"
+              />
+              <span className="absolute right-0 bottom-0 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+            </div>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <h3 className="truncate text-sm font-bold text-slate-900 transition group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400">
+                {user.fullName}
+              </h3>
+              <p className="truncate text-xs text-slate-500">
+                {user.bio || `@${user.username}`}
+              </p>
+            </div>
+          </Link>
+        ) : (
+          <Link href="/sign-in" className="group flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+              <Users className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <h3 className="truncate text-sm font-bold text-slate-900 transition group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400">
+                Đăng nhập
+              </h3>
+              <p className="truncate text-xs text-slate-500">Khám phá mạng xã hội</p>
+            </div>
+          </Link>
+        )}
       </div>
 
       {/* Main Navigation Menu */}

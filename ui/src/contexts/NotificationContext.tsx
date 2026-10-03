@@ -172,6 +172,22 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({
               return;
             }
 
+            // Phát sự kiện chung qua Window Event
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ws:message', { detail: data }));
+            }
+
+            // Phát sự kiện tin nhắn mới (message:new) cho màn hình chat
+            if (data.event === 'message:new' || data.type === 'message:new') {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('ws:chat-message', {
+                    detail: data.data || data,
+                  }),
+                );
+              }
+            }
+
             // Xử lý sự kiện nhận thông báo thời gian thực từ AWS Lambda SQS Worker
             if (data.event === 'NOTIFICATION_RECEIVED' || data.type === 'notification') {
               const notifData = (data.data || data) as Partial<ApiNotificationItem>;
