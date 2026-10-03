@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import appConfig from './config/app.config';
@@ -15,6 +16,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { MediaModule } from './modules/media/media.module';
 import { PostModule } from './modules/post/post.module';
 import { FriendModule } from './modules/friend/friend.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -46,6 +48,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     MediaModule,
     PostModule,
     FriendModule,
+    AuditLogsModule,
+    EventEmitterModule.forRoot(),
   ],
   controllers: [AppController],
   providers: [

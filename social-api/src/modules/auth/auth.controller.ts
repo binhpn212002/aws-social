@@ -3,9 +3,11 @@ import {
   Post,
   Get,
   Body,
+  Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -23,6 +25,7 @@ import {
 } from './dto/auth-response.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ClientInfoUtil } from '../../common/utils/client-info.util';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -50,8 +53,13 @@ export class AuthController {
     description: 'Đăng nhập thành công',
     type: AuthResponseDto,
   })
-  async login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+  ): Promise<AuthResponseDto> {
+    const clientIp = ClientInfoUtil.extractClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    return this.authService.login(dto, clientIp, userAgent);
   }
 
   @Public()
@@ -63,8 +71,13 @@ export class AuthController {
     description: 'Cấp token mới thành công',
     type: TokenDto,
   })
-  async refreshToken(@Body() dto: RefreshTokenDto): Promise<TokenDto> {
-    return this.authService.refreshToken(dto);
+  async refreshToken(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+  ): Promise<TokenDto> {
+    const clientIp = ClientInfoUtil.extractClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    return this.authService.refreshToken(dto, clientIp, userAgent);
   }
 
   @Post('logout')
@@ -77,8 +90,11 @@ export class AuthController {
   })
   async logout(
     @CurrentUser('sub') userId: string,
+    @Req() req: Request,
   ): Promise<{ message: string }> {
-    return this.authService.logout(userId);
+    const clientIp = ClientInfoUtil.extractClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    return this.authService.logout(userId, clientIp, userAgent);
   }
 
   @Get('me')

@@ -136,7 +136,9 @@ describe('PostService', () => {
       expect(result.uploadUrl).toBe(
         'https://s3.amazonaws.com/upload-presigned-url',
       );
-      expect(result.s3Key).toMatch(/^posts\/user-123\/\d+-[a-f0-9]+-vacation\.jpg$/);
+      expect(result.s3Key).toMatch(
+        /^posts\/user-123\/\d+-[a-f0-9]+-vacation\.jpg$/,
+      );
       expect(result.expiresIn).toBe(900);
       expect(s3Service.getPresignedPutUrl).toHaveBeenCalled();
     });
@@ -194,7 +196,9 @@ describe('PostService', () => {
         .fn()
         .mockResolvedValue(new Set(['post-uuid-1']));
 
-      const result = await postService.getNewsFeed('user-uuid-1', { limit: 10 });
+      const result = await postService.getNewsFeed('user-uuid-1', {
+        limit: 10,
+      });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].isLiked).toBe(true);
@@ -204,7 +208,9 @@ describe('PostService', () => {
 
   describe('getPostById', () => {
     it('ném lỗi PostNotFoundException khi bài viết không tồn tại', async () => {
-      postRepository.findPostByIdWithDetails = jest.fn().mockResolvedValue(null);
+      postRepository.findPostByIdWithDetails = jest
+        .fn()
+        .mockResolvedValue(null);
 
       await expect(
         postService.getPostById('non-existent-id', 'user-uuid-1'),
@@ -276,10 +282,7 @@ describe('PostService', () => {
       postRepository.findById = jest.fn().mockResolvedValue(mockPost);
       postRepository.softDelete = jest.fn().mockResolvedValue(true);
 
-      const result = await postService.deletePost(
-        'post-uuid-1',
-        'user-uuid-1',
-      );
+      const result = await postService.deletePost('post-uuid-1', 'user-uuid-1');
 
       expect(result.message).toBe('Đã xóa bài viết thành công');
       expect(postRepository.softDelete).toHaveBeenCalledWith('post-uuid-1');

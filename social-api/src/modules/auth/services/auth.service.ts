@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../../user/services/user.service';
 import { TokenService } from './token.service';
@@ -24,13 +25,26 @@ import {
   UserInactiveOrNotFoundException,
   UserNotFoundException,
 } from '../../../common/exceptions/user.exception';
+import { AuditLogEvent } from '../../audit-logs/events/audit-log.event';
+import {
+  AuditAction,
+  AuditCategory,
+  AuditStatus,
+} from '../../audit-logs/interfaces/audit-log.interface';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
     private readonly tokenService: TokenService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private emitAuditLog(event: AuditLogEvent): void {
+    if (this.eventEmitter) {
+      this.eventEmitter.emit('audit.log', event);
+    }
+  }
 
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
     const { emailExists, usernameExists } =
@@ -62,29 +76,92 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto): Promise<AuthResponseDto> {
+  async login(
+    dto: LoginDto,
+    clientIp: string = '127.0.0.1',
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
     const user = await this.userService.findByIdentifierWithPassword(
       dto.identifier.toLowerCase(),
     );
 
     if (!user) {
+      this.emitAuditLog(
+        new AuditLogEvent({
+          identifier: dto.identifier,
+          category: AuditCategory.AUTH,
+          action: AuditAction.LOGIN_FAILED,
+          status: AuditStatus.FAILURE,
+          failureReason: 'USER_NOT_FOUND',
+          ipAddress: clientIp,
+          userAgent,
+        }),
+      );
       throw new InvalidCredentialsException();
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.password);
     if (!isMatch) {
+      this.emitAuditLog(
+        new AuditLogEvent({
+          userId: user.id,
+          identifier: dto.identifier,
+          category: AuditCategory.AUTH,
+          action: AuditAction.LOGIN_FAILED,
+          status: AuditStatus.FAILURE,
+          failureReason: 'INVALID_PASSWORD',
+          ipAddress: clientIp,
+          userAgent,
+        }),
+      );
       throw new InvalidCredentialsException();
     }
 
     if (user.status === UserStatus.BANNED) {
+      this.emitAuditLog(
+        new AuditLogEvent({
+          userId: user.id,
+          identifier: user.email,
+          category: AuditCategory.AUTH,
+          action: AuditAction.LOGIN_FAILED,
+          status: AuditStatus.FAILURE,
+          failureReason: 'USER_BANNED',
+          ipAddress: clientIp,
+          userAgent,
+        }),
+      );
       throw new UserBannedException();
     }
     if (user.status === UserStatus.INACTIVE) {
+      this.emitAuditLog(
+        new AuditLogEvent({
+          userId: user.id,
+          identifier: user.email,
+          category: AuditCategory.AUTH,
+          action: AuditAction.LOGIN_FAILED,
+          status: AuditStatus.FAILURE,
+          failureReason: 'USER_INACTIVE',
+          ipAddress: clientIp,
+          userAgent,
+        }),
+      );
       throw new UserInactiveException();
     }
 
     await this.userService.updateLastLogin(user.id);
     const tokens = await this.tokenService.generateTokens(user);
+
+    this.emitAuditLog(
+      new AuditLogEvent({
+        userId: user.id,
+        identifier: user.email,
+        category: AuditCategory.AUTH,
+        action: AuditAction.LOGIN_SUCCESS,
+        status: AuditStatus.SUCCESS,
+        ipAddress: clientIp,
+        userAgent,
+      }),
+    );
 
     return {
       user: this.mapToUserProfile(user),
@@ -92,7 +169,11 @@ export class AuthService {
     };
   }
 
-  async refreshToken(dto: RefreshTokenDto): Promise<TokenDto> {
+  async refreshToken(
+    dto: RefreshTokenDto,
+    clientIp: string = '127.0.0.1',
+    userAgent?: string,
+  ): Promise<TokenDto> {
     const payload = await this.tokenService.verifyRefreshToken(
       dto.refreshToken,
     );
@@ -102,11 +183,41 @@ export class AuthService {
       throw new UserInactiveOrNotFoundException();
     }
 
+    this.emitAuditLog(
+      new AuditLogEvent({
+        userId: user.id,
+        identifier: user.email,
+        category: AuditCategory.AUTH,
+        action: AuditAction.REFRESH_TOKEN,
+        status: AuditStatus.SUCCESS,
+        ipAddress: clientIp,
+        userAgent,
+      }),
+    );
+
     return this.tokenService.generateTokens(user);
   }
 
-  async logout(userId: string): Promise<{ message: string }> {
+  async logout(
+    userId: string,
+    clientIp: string = '127.0.0.1',
+    userAgent?: string,
+  ): Promise<{ message: string }> {
     await this.tokenService.revokeRefreshToken(userId);
+
+    const user = await this.userService.findById(userId);
+    this.emitAuditLog(
+      new AuditLogEvent({
+        userId,
+        identifier: user ? user.email : userId,
+        category: AuditCategory.AUTH,
+        action: AuditAction.LOGOUT,
+        status: AuditStatus.SUCCESS,
+        ipAddress: clientIp,
+        userAgent,
+      }),
+    );
+
     return { message: 'Đăng xuất thành công' };
   }
 

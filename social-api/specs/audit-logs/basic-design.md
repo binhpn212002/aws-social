@@ -1,51 +1,54 @@
-# Thiết kế cơ bản (Basic Design): Module Audit Logs (Nhật ký Kiểm toán Hoạt động & Bảo mật)
+# Thiết kế cơ bản (Basic Design): Module Audit Logs (Lưu trữ độc quyền trên Amazon DynamoDB)
 
-Tài liệu thiết kế cơ bản cho hệ thống ghi vết kiểm toán (**Audit Log System**), chịu trách nhiệm theo dõi, ghi nhận và lưu trữ toàn bộ các thao tác nhạy cảm liên quan đến danh tính và an ninh tài khoản (**Đăng nhập, Đăng xuất, Đổi mật khẩu, Thay đổi quyền**) cho hệ thống Social Network API.
+Tài liệu thiết kế cơ bản cho hệ thống ghi vết kiểm toán (**Audit Log System**), chịu trách nhiệm theo dõi, ghi nhận và lưu trữ toàn bộ các thao tác nhạy cảm liên quan đến danh tính và an ninh tài khoản (**Đăng nhập, Đăng xuất, Đổi mật khẩu, Cấp lại token**) cho hệ thống Social Network API. 
+
+Toàn bộ dữ liệu kiểm toán được lưu trữ **độc quyền trên Amazon DynamoDB** (`social-audit-logs`), tận dụng khả năng co giãn không giới hạn (Serverless Auto-scaling), độ trễ đọc/ghi < 10ms và tính năng tự động thu hồi dữ liệu qua **Time-To-Live (TTL)**.
 
 ---
 
 ## 1. Tổng quan & Mục tiêu
 
-Hệ thống **Audit Logs** đóng vai trò là xương sống cho việc giám sát an ninh (Security Monitoring), phát hiện xâm nhập (Intrusion Detection) và đáp ứng các tiêu chuẩn bảo mật dữ liệu:
+Hệ thống **Audit Logs** đóng vai trò là xương sống cho việc giám sát an ninh (Security Monitoring), phát hiện xâm nhập (Intrusion Detection) và đáp ứng các tiêu chuẩn an toàn thông tin:
 - **Ghi nhận toàn bộ thao tác xác thực & bảo mật tài khoản**:
   - `LOGIN_SUCCESS`: Đăng nhập thành công.
   - `LOGIN_FAILED`: Đăng nhập thất bại (ghi nhận lý do: sai mật khẩu, tài khoản không tồn tại, tài khoản bị khóa).
   - `LOGOUT`: Đăng xuất khỏi hệ thống.
+  - `REFRESH_TOKEN`: Cấp mới Access Token bằng Refresh Token.
   - `CHANGE_PASSWORD_SUCCESS`: Đổi mật khẩu thành công.
-  - `CHANGE_PASSWORD_FAILED`: Đổi mật khẩu thất bại (sai mật khẩu cũ, mật khẩu mới không hợp lệ).
-  - `RESET_PASSWORD`: Yêu cầu hoặc hoàn tất đặt lại mật khẩu qua email.
+  - `CHANGE_PASSWORD_FAILED`: Đổi mật khẩu thất bại.
+  - `FORGOT_PASSWORD_REQUEST`: Yêu cầu gửi mã đặt lại mật khẩu.
+  - `RESET_PASSWORD_SUCCESS`: Đặt lại mật khẩu thành công.
 - **Thu thập ngữ cảnh toàn diện (Contextual Metadata)**:
   - Địa chỉ IP thực của người dùng (`ip_address`).
   - Chuỗi định danh thiết bị & trình duyệt (`user_agent`, `device_info`).
   - Thời gian thực hiện chuẩn UTC (`created_at`).
   - Dữ liệu bổ sung dạng JSON (`metadata`).
 - **Nguyên tắc kiến trúc cốt lõi**:
-  - **Phi chặn (Non-blocking & Asynchronous)**: Ghi log hoàn toàn bất đồng bộ thông qua Event Bus (`EventEmitter2`) hoặc Message Queue (AWS SQS / Redis), không gây tăng độ trễ (latency) của các API chính.
-  - **Tính bất biến (Append-Only / Tamper-Proof)**: Dữ liệu audit log chỉ được phép thêm mới (`INSERT`) và truy vấn (`SELECT`), cấm hoàn toàn hành vi sửa đổi (`UPDATE`) hoặc xóa tùy tiện (`DELETE`).
-  - **Lưu trữ & Phân vùng (Partitioning & Retention)**: Thiết kế hỗ trợ lượng dữ liệu lớn và phân vùng theo thời gian.
+  - **Lưu trữ độc quyền trên Amazon DynamoDB**: Toàn bộ thao tác ghi và đọc nhật ký kiểm toán tương tác trực tiếp với bảng DynamoDB `social-audit-logs` (được cấu hình và triển khai qua SST), hoàn toàn không lưu vào PostgreSQL nhằm tránh phình to cơ sở dữ liệu quan hệ chính.
+  - **Phi chặn (Non-blocking & Asynchronous)**: Ghi log hoàn toàn bất đồng bộ thông qua Event Bus (`EventEmitter2`), tách biệt micro-task trong nền, không làm tăng độ trễ (latency) của API đăng nhập.
+  - **Tính bất biến (Append-Only / Tamper-Proof)**: Dữ liệu audit log chỉ được phép thêm mới (`PutItem`) và truy vấn (`Query`/`GetItem`), cấm hoàn toàn hành vi sửa đổi (`UpdateItem`) hoặc xóa thủ công (`DeleteItem`) thông qua chính sách phân quyền IAM Policy.
+  - **Tự động hết hạn (Native DynamoDB TTL)**: Thuộc tính `ttl` (Unix timestamp) giúp DynamoDB tự động dọn dẹp các bản ghi quá 90 ngày với chi phí 0 đồng.
 
 ---
 
-## 2. Mô hình dữ liệu (Data Model)
+## 2. Mô hình dữ liệu trên Amazon DynamoDB (Single-Table Design)
 
-### 2.1. Bảng `audit_logs`
+Bảng DynamoDB sử dụng tài nguyên đã định nghĩa trong `sst.config.ts`:
+- **Tên bảng**: `social-audit-logs` (biến môi trường `AWS_DYNAMODB_AUDIT_LOG_TABLE_NAME`).
+- **Partition Key (PK)**: `String (S)`
+- **Sort Key (SK)**: `String (S)`
+- **TTL**: Thuộc tính `ttl` (Number - Epoch timestamp tính bằng giây).
 
-Kế thừa trường `id` UUID v4 và `created_at` từ `BaseEntity`.
+### 2.1. Cấu trúc Partition Key (PK) & Sort Key (SK)
 
-| Tên cột | Kiểu dữ liệu | Bắt buộc | Khóa / Chỉ mục | Mô tả / Giá trị mặc định |
-| :--- | :--- | :---: | :---: | :--- |
-| `id` | UUID | Có | PK | Khóa chính tự sinh (UUID v4) |
-| `user_id` | UUID | Không | FK, Index | ID người dùng thực hiện (null nếu login thất bại với tài khoản không tồn tại) |
-| `identifier` | VARCHAR(255) | Có | Index | Email hoặc username người dùng nhập khi thao tác |
-| `category` | VARCHAR(50) | Có | Index | Nhóm hành động: `AUTH`, `ACCOUNT_SECURITY`, `ADMIN_ACTION` |
-| `action` | VARCHAR(50) | Có | Index | Tên hành động cụ thể (xem Enums) |
-| `status` | VARCHAR(20) | Có | Index | Trạng thái: `SUCCESS`, `FAILURE` |
-| `ip_address` | VARCHAR(45) | Có | Index | Địa chỉ IPv4 hoặc IPv6 của client |
-| `user_agent` | TEXT | Không | - | Chuỗi User-Agent gốc từ HTTP Request Header |
-| `device_info` | VARCHAR(150) | Không | - | Thiết bị/trình duyệt đã chuẩn hóa (ví dụ: `iOS 17 Mobile`, `Chrome 122 / macOS`) |
-| `failure_reason` | VARCHAR(255) | Không | - | Mã hoặc lý do lỗi chi tiết nếu thất bại |
-| `metadata` | JSONB | Không | - | Dữ liệu ngữ cảnh bổ sung (ví dụ: headers, location, token_id) |
-| `created_at` | TIMESTAMPTZ | Có | Index (DESC) | Thời điểm ghi nhận hành động |
+| Thực thể / Mục đích truy vấn | Partition Key (PK) | Sort Key (SK) | Các thuộc tính dữ liệu khác (Attributes) |
+| :--- | :--- | :--- | :--- |
+| **Lịch sử người dùng** *(User Audit Timeline)* | `USER#{userId}` | `LOG#{createdAt}#{logId}` | `logId`, `userId`, `identifier`, `category`, `action`, `status`, `ipAddress`, `userAgent`, `deviceInfo`, `failureReason`, `metadata`, `createdAt`, `ttl` |
+| **Lịch sử đăng nhập ẩn danh / thất bại** *(Identifier Timeline)* | `IDENTIFIER#{identifier}` | `LOG#{createdAt}#{logId}` | Tương tự bản ghi User |
+| **Tra cứu trực tiếp theo ID** *(Direct Lookup by Log ID)* | `LOG#{logId}` | `METADATA` | Toàn bộ thông tin chi tiết của bản ghi kiểm toán |
+| **Dòng thời gian hệ thống theo tháng** *(Admin Timeline)* | `SYSTEM_LOGS#{YYYY-MM}` | `TIMESTAMP#{createdAt}#{logId}` | Toàn bộ thông tin bản ghi phục vụ Admin tra cứu theo tháng |
+| **Bộ đếm phát hiện Brute-Force** *(Security Sliding Window)* | `FAILED#{identifier}` | `TIMESTAMP#{createdAt}#{logId}` | `identifier`, `ipAddress`, `createdAt`, `ttl` (15 phút) |
+| **Bộ đếm IP bất thường** *(IP Anomaly Counter)* | `FAILED_IP#{ipAddress}` | `TIMESTAMP#{createdAt}#{logId}` | `identifier`, `ipAddress`, `createdAt`, `ttl` (15 phút) |
 
 ---
 
@@ -77,43 +80,7 @@ export enum AuditStatus {
 
 ---
 
-### 2.3. Sơ đồ thực thể quan hệ (ERD)
-
-```mermaid
-erDiagram
-    users ||--o{ audit_logs : "has audit records"
-
-    users {
-        uuid id PK "UUID v4"
-        varchar email UK
-        varchar username UK
-        varchar full_name
-        varchar role "USER | ADMIN"
-        varchar status "ACTIVE | INACTIVE | BANNED"
-        timestamptz created_at
-    }
-
-    audit_logs {
-        uuid id PK "UUID v4"
-        uuid user_id FK "Nullable"
-        varchar identifier "Email hoặc Username"
-        varchar category "AUTH | ACCOUNT_SECURITY"
-        varchar action "LOGIN_SUCCESS | LOGIN_FAILED | LOGOUT | CHANGE_PASSWORD_..."
-        varchar status "SUCCESS | FAILURE"
-        varchar ip_address "IPv4 / IPv6"
-        text user_agent "User-Agent Header"
-        varchar device_info "Hệ điều hành & Browser"
-        varchar failure_reason "Lý do nếu thất bại"
-        jsonb metadata "Thông tin phụ trợ"
-        timestamptz created_at "Audit Timestamp"
-    }
-```
-
----
-
 ## 3. Kiến trúc luồng xử lý phi chặn (Asynchronous Architecture)
-
-Để đảm bảo hiệu năng tối ưu, việc lưu Audit Log diễn ra theo mô hình **Event-Driven phi chặn**:
 
 ```mermaid
 sequenceDiagram
@@ -124,25 +91,25 @@ sequenceDiagram
     participant EventBus as NestJS EventBus / EventEmitter2
     participant Listener as AuditLogListener
     participant DeviceParser as Device/IP Utility
-    participant Database as PostgreSQL (audit_logs)
+    participant DynamoDB as Amazon DynamoDB (social-audit-logs)
 
     Client->>Controller: POST /api/v1/auth/login (email, password)
     Controller->>Service: Xử lý đăng nhập
     alt Đăng nhập thành công
         Service-->>Controller: Kết quả { user, tokens }
         Service->>EventBus: emit('audit.log', { action: LOGIN_SUCCESS, status: SUCCESS, userId, clientInfo })
-        Controller-->>Client: 200 OK (Trả về ngay lập tức, không chờ DB log)
+        Controller-->>Client: 200 OK (Trả về ngay lập tức, không chờ DynamoDB)
     else Đăng nhập thất bại
         Service->>EventBus: emit('audit.log', { action: LOGIN_FAILED, status: FAILURE, reason: 'INVALID_CREDENTIALS', clientInfo })
         Service-->>Controller: Ném lỗi UnauthorizedException
         Controller-->>Client: 401 Unauthorized
     end
 
-    Note over EventBus, Database: Xử lý bất đồng bộ trong nền (Background Async)
+    Note over EventBus, DynamoDB: Xử lý bất đồng bộ trong nền (Background Async)
     EventBus->>Listener: OnEvent('audit.log')
     Listener->>DeviceParser: Phân tích IP và User-Agent -> Chuẩn hóa DeviceInfo
     DeviceParser-->>Listener: { deviceInfo: "Chrome 122 / macOS" }
-    Listener->>Database: INSERT INTO audit_logs (category, action, status, ip, user_agent, ...)
+    Listener->>DynamoDB: PutItem / TransactWriteItems (PK: USER#id, SK: LOG#timestamp#id, ttl)
 ```
 
 ---
@@ -152,85 +119,52 @@ sequenceDiagram
 Tiền tố chung: `/api/v1/audit-logs`
 
 ### 4.1. `GET /api/v1/audit-logs/me`
-- **Mô tả**: Cho phép người dùng đang đăng nhập xem lịch sử bảo mật cá nhân (ví dụ: các lần đăng nhập gần đây, đổi mật khẩu).
+- **Mô tả**: Cho phép người dùng đang đăng nhập xem lịch sử bảo mật cá nhân (các lần đăng nhập gần đây, đổi mật khẩu).
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Query Params**:
-  - `page`: Số trang (mặc định: `1`).
-  - `limit`: Số bản ghi mỗi trang (mặc định: `10`, tối đa: `50`).
+  - `limit`: Số bản ghi (mặc định: `10`, tối đa: `50`).
+  - `cursor`: Chuỗi con trỏ DynamoDB (`LastEvaluatedKey` mã hóa base64) cho trang tiếp theo.
+- **DynamoDB Operation**: `QueryCommand`:
+  - `PK = USER#{userId} AND SK begins_with "LOG#"`
+  - `ScanIndexForward = false` (sắp xếp giảm dần theo thời gian)
 - **Response**: `200 OK`
-  ```json
-  {
-    "statusCode": 200,
-    "data": {
-      "items": [
-        {
-          "id": "7fa1bc82-0192-4f2a-8c65-b1a9e88029d1",
-          "action": "LOGIN_SUCCESS",
-          "status": "SUCCESS",
-          "ipAddress": "14.241.23.10",
-          "deviceInfo": "Chrome 122 / macOS",
-          "createdAt": "2026-10-02T19:00:00.000Z"
-        },
-        {
-          "id": "e4b3e811-9a42-4f36-8a71-6c1cf6ec32b9",
-          "action": "CHANGE_PASSWORD_SUCCESS",
-          "status": "SUCCESS",
-          "ipAddress": "14.241.23.10",
-          "deviceInfo": "Chrome 122 / macOS",
-          "createdAt": "2026-10-02T18:45:00.000Z"
-        },
-        {
-          "id": "18c29012-32ba-4b21-9981-01928471ef01",
-          "action": "LOGIN_FAILED",
-          "status": "FAILURE",
-          "failureReason": "INVALID_CREDENTIALS",
-          "ipAddress": "113.161.40.55",
-          "deviceInfo": "Safari Mobile / iOS",
-          "createdAt": "2026-10-02T18:30:00.000Z"
-        }
-      ],
-      "meta": {
-        "totalItems": 15,
-        "currentPage": 1,
-        "totalPages": 2
-      }
-    }
-  }
-  ```
 
 ---
 
 ### 4.2. `GET /api/v1/audit-logs` (Dành cho Quản trị viên - Admin Portal)
-- **Mô tả**: Xem và lọc toàn bộ nhật ký kiểm toán trong hệ thống.
+- **Mô tả**: Xem và lọc nhật ký kiểm toán trong hệ thống.
 - **Quyền truy cập**: Authenticated & Role `ADMIN` (`@Roles('ADMIN')`).
 - **Query Params**:
-  - `userId`: Lọc theo ID người dùng.
-  - `identifier`: Tìm kiếm theo email hoặc username.
+  - `userId`: Lọc theo ID người dùng (`PK = USER#{userId}`).
+  - `identifier`: Tìm kiếm theo email (`PK = IDENTIFIER#{identifier}`).
+  - `month`: Tháng cần tra cứu (định dạng `YYYY-MM`, mặc định tháng hiện tại: `PK = SYSTEM_LOGS#{YYYY-MM}`).
   - `action`: Lọc theo hành động (`LOGIN_FAILED`, `CHANGE_PASSWORD_SUCCESS`,...).
   - `status`: Lọc theo kết quả (`SUCCESS`, `FAILURE`).
   - `ipAddress`: Lọc theo địa chỉ IP nghi vấn.
-  - `fromDate`, `toDate`: Khoảng thời gian (ISO-8601).
-  - `page`, `limit`: Phân trang.
-- **Response**: `200 OK` (Danh sách đầy đủ kèm thông tin User chi tiết).
+  - `limit`: Số bản ghi mỗi trang (mặc định: `20`, tối đa: `100`).
+  - `cursor`: Chuỗi con trỏ DynamoDB phân trang.
+- **Response**: `200 OK`
 
 ---
 
 ### 4.3. `GET /api/v1/audit-logs/:id`
 - **Mô tả**: Xem chi tiết 1 bản ghi kiểm toán kèm toàn bộ chuỗi metadata.
 - **Quyền truy cập**: Authenticated (`ADMIN` hoặc chính chủ sở hữu bản ghi log).
+- **DynamoDB Operation**: `GetCommand`:
+  - `Key: { PK: "LOG#" + id, SK: "METADATA" }` (Truy xuất tức thời O(1))
 - **Response**: `200 OK`
 
 ---
 
-## 5. Quy chuẩn an ninh, Hiệu năng & Lưu trữ dài hạn
+## 5. Quy chuẩn an ninh & Hiệu năng Amazon DynamoDB
 
-1. **Bảo toàn dữ liệu kiểm toán (Tamper-Proof Policy)**:
-   - Cấu hình phân quyền trên Database PostgreSQL: user ứng dụng (`social_api_user`) chỉ có quyền `INSERT` và `SELECT` trên bảng `audit_logs`. Tuyệt đối không cấp quyền `UPDATE` và `DELETE`.
-2. **Chống tấn công Brute-force & Cảnh báo an ninh**:
-   - Dựa trên các bản ghi `LOGIN_FAILED` liên tiếp:
-     - Nếu có `>= 5` lần đăng nhập thất bại từ cùng một `identifier` hoặc cùng một `ip_address` trong vòng 10 phút -> Hệ thống tự động kích hoạt Rate Limiting và gửi email cảnh báo bảo mật tới người dùng.
-3. **Phân vùng bảng (Table Partitioning)**:
-   - Với lượng truy cập lớn, bảng `audit_logs` được cấu hình phân vùng theo tháng dựa trên cột `created_at` (`PARTITION BY RANGE (created_at)`), giúp duy trì tốc độ truy vấn cao và quản lý vòng đời dữ liệu dễ dàng.
-4. **Chính sách lưu trữ dài hạn (Data Retention)**:
-   - Dữ liệu `audit_logs` được lưu trữ trực tiếp trên PostgreSQL trong vòng 90 ngày.
-   - Định kỳ mỗi cuối tháng, dữ liệu cũ hơn 90 ngày được sao lưu tự động ra file Parquet nén và chuyển vào **AWS S3 Standard-IA / S3 Glacier** phục vụ kiểm toán dài hạn với chi phí lưu trữ tối thiểu.
+1. **Bảo toàn dữ liệu kiểm toán (Tamper-Proof IAM Policy)**:
+   - AWS IAM Role của ứng dụng (`social-api-role`) chỉ được cấp các quyền `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:Query`, `dynamodb:Scan` trên ARN bảng `arn:aws:dynamodb:*:table/social-audit-logs`.
+   - Quyền `dynamodb:DeleteItem` và `dynamodb:UpdateItem` bị **DENY** tuyệt đối.
+2. **Cơ chế phát hiện Brute-Force tốc độ cao**:
+   - Dựa trên item `FAILED#{identifier}` với TTL = 15 phút:
+   - Khi có sự kiện `LOGIN_FAILED`, thực hiện `QueryCommand` đếm số bản ghi trong 10 phút gần nhất.
+   - Nếu `>= 5` lần đăng nhập thất bại -> Gắn cờ cảnh báo an ninh và kích hoạt Rate Limiter.
+3. **Quản lý vòng đời dữ liệu tự động (Zero-Cost TTL Cleanup)**:
+   - Mọi bản ghi kiểm toán đều có trường `ttl = Math.floor(Date.now() / 1000) + (90 * 86400)`.
+   - DynamoDB tự động thu hồi và giải phóng dung lượng bản ghi cũ sau 90 ngày mà không tiêu tốn Read/Write Capacity Unit (RCU/WCU).

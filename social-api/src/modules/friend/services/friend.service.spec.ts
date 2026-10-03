@@ -56,7 +56,7 @@ describe('FriendService', () => {
 
     friendService = new FriendService(
       friendshipRepository as any,
-      userRepository as any,
+      userRepository,
     );
   });
 

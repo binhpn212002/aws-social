@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, UnauthorizedException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -12,7 +17,11 @@ jest.mock('@nestjs/typeorm', () => ({
 import { AuthService } from './auth.service';
 import { UserService } from '../../user/services/user.service';
 import { TokenService } from './token.service';
-import { User, UserRole, UserStatus } from '../../../database/entities/user.entity';
+import {
+  User,
+  UserRole,
+  UserStatus,
+} from '../../../database/entities/user.entity';
 
 describe('AuthService', () => {
   let authService: AuthService;
