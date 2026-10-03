@@ -1,21 +1,35 @@
-# Thiết kế cơ bản (Basic Design): Module Notification (Thông báo Real-time & Thông báo Lập lịch cho Bạn bè)
+# Thiết kế cơ bản (Basic Design): Module Notification (Event-Driven Queue & Lambda Worker)
 
-Tài liệu thiết kế cơ bản cho hệ thống thông báo (**Notification System**), bao gồm:
-1. **Thông báo thời gian thực (Real-time In-App Notification via AWS WebSocket)**: Tức thời thông báo khi có người bình luận vào bài viết của mình, trả lời bình luận hoặc tương tác mạng xã hội.
-2. **Thông báo lập lịch cho bạn bè (Scheduled Notification to Friends via AWS EventBridge Scheduler & SQS)**: Cho phép người dùng lên lịch gửi thông báo nhắc nhở, sự kiện, thiệp mừng tới toàn bộ hoặc nhóm bạn bè được chọn vào một thời điểm trong tương lai.
+Tài liệu thiết kế cơ bản cho hệ thống thông báo (**Notification System**) ứng dụng kiến trúc hướng sự kiện bất đồng bộ (**Asynchronous Event-Driven Architecture**) trên AWS, bao gồm:
+1. **Thông báo tương tác thời gian thực (Real-time In-App Notification via SQS + Lambda + WebSocket)**: Khi người dùng tương tác (bình luận, like, kết bạn...), hệ thống đẩy job vào hàng đợi SQS, kích hoạt Lambda Function để bắn tin qua AWS API Gateway WebSocket, sau đó Lambda gọi API `notify-completed` để cập nhật trạng thái thông báo trong hệ thống.
+2. **Thông báo lập lịch cho bạn bè (Scheduled Notification to Friends via EventBridge + SQS + Lambda)**: Cho phép người dùng lên lịch gửi thông báo tới bạn bè vào thời điểm xác định trong tương lai, xử lý bất đồng bộ qua hàng đợi và worker Lambda tự động.
 
 ---
 
-## 1. Tổng quan & Mục tiêu
+## 1. Tổng quan & Kiến trúc hướng sự kiện (Event-Driven Architecture)
 
-Module **Notification** đóng vai trò tương tác và giữ chân người dùng trong hệ thống:
-- **Thông báo sự kiện thời gian thực (Real-time Events)**:
-  - Khi người dùng khác bình luận vào bài viết (`COMMENT_POST`), trả lời bình luận (`REPLY_COMMENT`), thích bài viết (`LIKE_POST`), gửi lời mời kết bạn (`FRIEND_REQUEST`), chấp nhận kết bạn (`FRIEND_ACCEPTED`).
-  - Hệ thống tạo bản ghi thông báo trong PostgreSQL và đẩy ngay lập tức qua **AWS API Gateway WebSocket** tới các kết nối đang trực tuyến của người nhận.
-- **Tính năng Thông báo lập lịch (Scheduled Notifications)**:
-  - Người dùng có thể lên lịch gửi thông báo đến bạn bè của mình vào thời gian xác định trước (ví dụ: nhắc hẹn tiệc, thông báo sinh nhật, thông báo sự kiện cá nhân).
-  - Tùy chọn phạm vi người nhận: Toàn bộ bạn bè (`ALL_FRIENDS`) hoặc danh sách bạn bè chọn lọc (`SELECTED_FRIENDS`).
-  - Tích hợp dịch vụ phi máy chủ chuẩn của AWS: **AWS EventBridge Scheduler** + **AWS SQS / Worker** để kích hoạt tự động theo chuẩn xác thời gian thực mà không làm tiêu tốn tài nguyên hệ thống khi chờ đợi.
+### 1.1. Mục tiêu
+- **Phân tách nghiệp vụ (Decoupling) & Tối ưu thời gian phản hồi (Low Latency)**: Các thao tác chính (bình luận bài viết, like, gửi lời mời kết bạn...) không bị nghẽn (block) bởi việc gửi thông báo. Backend API chỉ cần ghi nhận bản ghi thông báo ở trạng thái chờ và đẩy message vào hàng đợi **AWS SQS Queue** rồi trả kết quả ngay cho người dùng.
+- **Xử lý phi máy chủ (Serverless Processing with AWS Lambda)**: **AWS SQS** tự động kích hoạt **AWS Lambda Worker** tiêu thụ message theo lô (batch), tối ưu chi phí và mở rộng quy mô tức thời mà không cần duy trì worker server 24/7.
+- **Xác thực hoàn tất gửi thông báo (Callback Loop via `notify-completed`)**: Sau khi Lambda Worker hoàn thành việc gửi frame thông báo qua API Gateway WebSocket (hoặc Push Notification), Worker thực hiện gọi lại API `POST /api/v1/notifications/notify-completed` của Social API để cập nhật trạng thái gửi thành công (`COMPLETED`) hoặc thất bại (`FAILED`).
+
+### 1.2. Sơ đồ kiến trúc tổng quan (High-Level Architecture)
+
+```mermaid
+flowchart LR
+    ClientA[Client User A] -->|1. Tương tác: Comment/Like/Friend| NestAPI[Social API (NestJS)]
+    NestAPI -->|2. Lưu status: PENDING| DB[(PostgreSQL)]
+    NestAPI -->|3. Đẩy Job| SQS[AWS SQS: NotificationQueue]
+    NestAPI -.->|4. Trả response ngay| ClientA
+
+    SQS -->|5. Trigger Event| Lambda[AWS Lambda: NotificationWorker]
+    Lambda -->|6. Lấy connectionId| Redis[(Redis WS Store)]
+    Lambda -->|7. Gửi thông báo tức thì| ApiGwWs[AWS API Gateway WebSocket]
+    ApiGwWs -->|8. Push Real-time| ClientB[Client User B (Người nhận)]
+    
+    Lambda -->|9. Gọi API: notify-completed| NestAPI
+    NestAPI -->|10. Cập nhật status: COMPLETED| DB
+```
 
 ---
 
@@ -30,14 +44,18 @@ Kế thừa `BaseEntity` (`id` UUID v4, `created_at`, `updated_at`, `deleted_at`
 | `id` | UUID | Có | PK | Khóa chính tự sinh (UUID v4) |
 | `recipient_id` | UUID | Có | FK, Index | Người nhận thông báo (tham chiếu `users.id`) |
 | `sender_id` | UUID | Không | FK | Người tạo ra tương tác (tham chiếu `users.id`) |
-| `type` | VARCHAR(30) | Có | Index | Phân loại thông báo (xem Enums) |
+| `type` | VARCHAR(30) | Có | Index | Phân loại thông báo (xem `NotificationType`) |
 | `title` | VARCHAR(255) | Có | - | Tiêu đề thông báo |
 | `message` | TEXT | Có | - | Nội dung chi tiết thông báo |
-| `reference_id` | UUID | Không | Index | ID thực thể liên quan (ID bài viết, ID bình luận, v.v.) |
+| `reference_id` | UUID | Không | Index | ID thực thể liên quan (ID bài viết, comment, lời mời bạn bè, ...) |
 | `reference_type` | VARCHAR(50) | Không | - | Loại thực thể: `POST`, `COMMENT`, `FRIEND_REQUEST`, `SCHEDULE_REMINDER` |
-| `is_read` | BOOLEAN | Có | Index | Trạng thái đã xem hay chưa (mặc định: `false`) |
+| `status` | VARCHAR(20) | Có | Index | Trạng thái gửi: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` (mặc định: `PENDING`) |
+| `is_read` | BOOLEAN | Có | Index | Trạng thái người dùng đã xem thông báo chưa (mặc định: `false`) |
 | `read_at` | TIMESTAMPTZ | Không | - | Thời điểm người dùng đọc thông báo |
+| `sent_at` | TIMESTAMPTZ | Không | - | Thời điểm Worker gửi thông báo thành công |
+| `error_message` | TEXT | Không | - | Ghi nhận chi tiết lỗi nếu gửi thất bại |
 | `created_at` | TIMESTAMPTZ | Có | Index (DESC) | Thời gian tạo thông báo |
+| `updated_at` | TIMESTAMPTZ | Có | - | Thời gian cập nhật gần nhất |
 
 ### 2.2. Bảng `scheduled_notifications` (Lịch gửi thông báo cho bạn bè)
 
@@ -50,7 +68,7 @@ Kế thừa `BaseEntity` (`id` UUID v4, `created_at`, `updated_at`, `deleted_at`
 | `scheduled_at` | TIMESTAMPTZ | Có | Index | Thời điểm dự kiến phát thông báo (UTC) |
 | `target_type` | VARCHAR(20) | Có | - | Đối tượng: `ALL_FRIENDS`, `SELECTED_FRIENDS` |
 | `target_user_ids` | JSONB | Không | - | Mảng UUID danh sách bạn bè nếu chọn `SELECTED_FRIENDS` |
-| `status` | VARCHAR(20) | Có | Index | Trạng thái: `PENDING`, `PROCESSING`, `COMPLETED`, `CANCELLED` |
+| `status` | VARCHAR(20) | Có | Index | Trạng thái: `PENDING`, `PROCESSING`, `COMPLETED`, `CANCELLED`, `FAILED` |
 | `scheduler_arn` | VARCHAR(500) | Không | - | ARN của schedule trên AWS EventBridge Scheduler |
 | `total_recipients` | INT | Không | - | Tổng số bạn bè đã nhận thông báo |
 | `sent_at` | TIMESTAMPTZ | Không | - | Thời điểm thực tế đã phát tán thông báo |
@@ -69,6 +87,13 @@ export enum NotificationType {
   SCHEDULED_REMINDER = 'SCHEDULED_REMINDER'// Thông báo hẹn giờ từ một người bạn
 }
 
+export enum NotificationStatus {
+  PENDING = 'PENDING',                     // Đã tạo bản ghi, đang nằm trong Queue chờ xử lý
+  PROCESSING = 'PROCESSING',               // Lambda Worker đang tiếp nhận và gửi
+  COMPLETED = 'COMPLETED',                 // Đã gửi thông báo thành công tới người nhận
+  FAILED = 'FAILED',                       // Gửi thất bại sau các lần retry
+}
+
 export enum ScheduleTargetType {
   ALL_FRIENDS = 'ALL_FRIENDS',
   SELECTED_FRIENDS = 'SELECTED_FRIENDS',
@@ -79,6 +104,7 @@ export enum ScheduleNotificationStatus {
   PROCESSING = 'PROCESSING',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
+  FAILED = 'FAILED',
 }
 ```
 
@@ -99,9 +125,13 @@ erDiagram
         text message
         uuid reference_id
         varchar reference_type
+        varchar status "PENDING | PROCESSING | COMPLETED | FAILED"
         boolean is_read
         timestamptz read_at
+        timestamptz sent_at
+        text error_message
         timestamptz created_at
+        timestamptz updated_at
     }
 
     scheduled_notifications {
@@ -112,11 +142,12 @@ erDiagram
         timestamptz scheduled_at
         varchar target_type "ALL_FRIENDS | SELECTED_FRIENDS"
         jsonb target_user_ids
-        varchar status "PENDING | PROCESSING | COMPLETED | CANCELLED"
+        varchar status "PENDING | PROCESSING | COMPLETED | CANCELLED | FAILED"
         varchar scheduler_arn
         int total_recipients
         timestamptz sent_at
         timestamptz created_at
+        timestamptz updated_at
     }
 ```
 
@@ -124,40 +155,62 @@ erDiagram
 
 ## 3. Luồng xử lý nghiệp vụ (Business Workflows)
 
-### 3.1. Luồng Thông báo Bình luận mới qua WebSocket
+### 3.1. Luồng xử lý thông báo tương tác qua SQS Queue, Lambda Worker & API Callback
 
-Khi có người bình luận vào bài viết:
-1. `CommentService` kiểm tra nếu người bình luận khác chủ bài viết, gọi `NotificationService.sendNotification()`.
-2. Tạo bản ghi trong bảng `notifications`.
-3. Kiểm tra Redis xem chủ bài viết có kết nối WebSocket nào đang hoạt động (`ws:user:{authorId}:connections`).
-4. Với mỗi `connectionId`, gọi AWS SDK `ApiGatewayManagementApiClient.postToConnection()` gửi frame sự kiện `NOTIFICATION_RECEIVED`.
+Khi người dùng thực hiện một thao tác (ví dụ: User B bình luận bài viết của User A):
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor UserB as Người bình luận
+    actor UserB as Người bình luận (User B)
     participant CommentSvc as CommentService
     participant NotiSvc as NotificationService
     participant Database as PostgreSQL
+    participant SQS as AWS SQS (NotificationQueue)
+    actor UserA as Chủ bài viết (User A)
+    participant Lambda as AWS Lambda (NotificationWorker)
     participant Redis as Redis (WS Connections)
     participant ApiGw as AWS API Gateway WebSocket
-    actor UserA as Chủ bài viết
+    participant NotiCtrl as NotificationController (Callback API)
 
-    UserB->>CommentSvc: Tạo bình luận vào bài viết của User A
-    CommentSvc->>Database: Lưu bình luận
-    CommentSvc->>NotiSvc: createCommentNotification(sender: B, recipient: A, post, comment)
-    NotiSvc->>Database: INSERT INTO notifications (recipient_id: A, sender_id: B, type: COMMENT_POST, ...)
-    NotiSvc->>Redis: Lấy danh sách connectionId của User A
-    Redis-->>NotiSvc: [conn_userA_1]
-    NotiSvc->>ApiGw: postToConnection(conn_userA_1, payload: { event: "NOTIFICATION_RECEIVED", data: notiObj })
-    ApiGw-->>UserA: Nhận thông báo tức thì trên màn hình điện thoại/web
+    UserB->>CommentSvc: Gửi thao tác bình luận bài viết
+    CommentSvc->>Database: Lưu bình luận vào CSDL
+    CommentSvc->>NotiSvc: triggerNotification(sender: B, recipient: A, type: COMMENT_POST, ...)
+    
+    NotiSvc->>Database: INSERT INTO notifications (status: 'PENDING', recipient_id: A, ...)
+    Database-->>NotiSvc: Trả về notification record (với ID)
+    
+    NotiSvc->>SQS: SendMessageCommand(payload: { notificationId, recipientId, senderId, type, title, message, ... })
+    SQS-->>NotiSvc: MessageId
+    
+    NotiSvc-->>CommentSvc: Enqueued thành công
+    CommentSvc-->>UserB: 201 Created (Bình luận thành công ngay lập tức)
+
+    Note over SQS, Lambda: XỬ LÝ BẤT ĐỒNG BỘ QUA LAMBDA WORKER
+    SQS->>Lambda: Trigger Lambda event (SQSEvent with Records)
+    Lambda->>Redis: Tra cứu danh sách connectionId trực tuyến của User A
+    Redis-->>Lambda: [conn_userA_1]
+    
+    alt User A đang Online (Có active connectionId)
+        Lambda->>ApiGw: postToConnection(conn_userA_1, payload: { event: "NOTIFICATION_RECEIVED", data: {...} })
+        ApiGw-->>UserA: Nhận thông báo tức thì trên App
+    else User A Offline
+        Lambda->>Lambda: (Optional) Gửi Push Notification qua FCM/APNs
+    end
+
+    Note over Lambda, NotiCtrl: CALLBACK CẬP NHẬT TRẠNG THÁI APP
+    Lambda->>NotiCtrl: POST /api/v1/notifications/notify-completed<br/>Headers: { x-internal-api-key: "..." }<br/>Body: { notificationId, status: "COMPLETED", sentAt: "...", deliveredVia: "WEBSOCKET" }
+    NotiCtrl->>NotiSvc: markNotificationCompleted(dto)
+    NotiSvc->>Database: UPDATE notifications SET status = 'COMPLETED', sent_at = NOW() WHERE id = notificationId
+    Database-->>NotiSvc: Updated OK
+    NotiCtrl-->>Lambda: 200 OK (Cập nhật thành công)
 ```
 
 ---
 
-### 3.2. Luồng Lên lịch Thông báo tới Bạn bè (Scheduled Notification Architecture)
+### 3.2. Luồng Lên lịch Thông báo tới Bạn bè (Scheduled Notification Flow)
 
-Kiến trúc kết hợp giữa **AWS EventBridge Scheduler** và **AWS SQS**:
+Kiến trúc kết hợp giữa **AWS EventBridge Scheduler**, **AWS SQS** và **AWS Lambda Worker**:
 
 ```mermaid
 sequenceDiagram
@@ -167,8 +220,8 @@ sequenceDiagram
     participant SchedSvc as ScheduledNotificationService
     participant Database as PostgreSQL
     participant EventBridge as AWS EventBridge Scheduler
-    participant SQS as AWS SQS Queue
-    participant Worker as Scheduled Worker (Consumer)
+    participant SQS as AWS SQS (ScheduledNotificationQueue)
+    participant Lambda as AWS Lambda (ScheduledWorker)
     participant FriendRepo as FriendRepository
     participant ApiGw as AWS API Gateway WebSocket
     actor Friends as Danh sách bạn bè
@@ -176,37 +229,39 @@ sequenceDiagram
     Note over Creator, EventBridge: GIAI ĐOẠN 1: ĐẶT LỊCH THÔNG BÁO
     Creator->>NotiCtrl: POST /api/v1/notifications/schedules (title, content, scheduledAt, targetType)
     NotiCtrl->>SchedSvc: createSchedule(creatorId, dto)
-    SchedSvc->>Database: INSERT INTO scheduled_notifications (status: PENDING)
+    SchedSvc->>Database: INSERT INTO scheduled_notifications (status: 'PENDING')
     SchedSvc->>EventBridge: CreateScheduleCommand(at: scheduledAt, target: SQS Queue, payload: { scheduleId })
     EventBridge-->>SchedSvc: scheduleArn
     SchedSvc->>Database: UPDATE scheduled_notifications SET scheduler_arn = scheduleArn
     SchedSvc-->>NotiCtrl: 201 Created (Chi tiết lịch đã đặt)
     NotiCtrl-->>Creator: 201 Created
 
-    Note over EventBridge, Worker: GIAI ĐOẠN 2: THỰC THI KHI ĐẾN GIỜ HẸN
-    EventBridge->>SQS: Tới giờ hẹn -> Tự động bắn Message { scheduleId } vào SQS
-    SQS->>Worker: Consume message { scheduleId }
-    Worker->>Database: SELECT FROM scheduled_notifications WHERE id = scheduleId
-    Database-->>Worker: Bản ghi lịch (status: PENDING)
-    Worker->>Database: UPDATE scheduled_notifications SET status = 'PROCESSING'
+    Note over EventBridge, Lambda: GIAI ĐOẠN 2: THỰC THI KHI ĐẾN GIỜ HẸN
+    EventBridge->>SQS: Tới giờ hẹn -> Tự động đẩy Message { scheduleId } vào SQS
+    SQS->>Lambda: Trigger Lambda event { scheduleId }
+    
+    Lambda->>Database: SELECT FROM scheduled_notifications WHERE id = scheduleId
+    Database-->>Lambda: Bản ghi lịch (status: 'PENDING')
+    Lambda->>Database: UPDATE scheduled_notifications SET status = 'PROCESSING'
     
     alt targetType == 'ALL_FRIENDS'
-        Worker->>FriendRepo: Lấy danh sách tất cả bạn bè ACCEPTED của Creator
+        Lambda->>FriendRepo: Lấy danh sách tất cả bạn bè ACCEPTED của Creator
     else targetType == 'SELECTED_FRIENDS'
-        Worker->>FriendRepo: Lọc danh sách bạn bè theo target_user_ids
+        Lambda->>FriendRepo: Lọc danh sách bạn bè theo target_user_ids
     end
-    FriendRepo-->>Worker: [Friend 1, Friend 2, Friend 3...]
+    FriendRepo-->>Lambda: [Friend 1, Friend 2, Friend 3...]
     
-    Worker->>Database: Bulk INSERT INTO notifications cho tất cả bạn bè
+    Lambda->>Database: Bulk INSERT INTO notifications cho tất cả bạn bè (status: 'PENDING')
     loop Với từng bạn bè
-        Worker->>Worker: Kiểm tra trạng thái Online trên Redis
-        opt Nếu bạn bè đang Online
-            Worker->>ApiGw: postToConnection(friendConnId, payload: { event: "NOTIFICATION_RECEIVED", ... })
-            ApiGw-->>Friends: Thông báo thời gian thực hiện lên máy bạn bè
-        end
+        Lambda->>Lambda: Kiểm tra connectionId trên Redis & postToConnection qua API Gateway
+        ApiGw-->>Friends: Nhận thông báo tức thì trên thiết bị
     end
 
-    Worker->>Database: UPDATE scheduled_notifications SET status = 'COMPLETED', total_recipients = n, sent_at = NOW()
+    Note over Lambda, NotiCtrl: GIAI ĐOẠN 3: CALLBACK HOÀN TẤT LỊCH THÔNG BÁO
+    Lambda->>NotiCtrl: POST /api/v1/notifications/notify-completed<br/>Body: { scheduleId, status: "COMPLETED", totalRecipients: n, sentAt: NOW() }
+    NotiCtrl->>SchedSvc: completeSchedule(scheduleId, totalRecipients)
+    SchedSvc->>Database: UPDATE scheduled_notifications SET status = 'COMPLETED', total_recipients = n, sent_at = NOW()<br/>UPDATE notifications SET status = 'COMPLETED', sent_at = NOW() WHERE reference_id = scheduleId
+    NotiCtrl-->>Lambda: 200 OK
 ```
 
 ---
@@ -216,12 +271,13 @@ sequenceDiagram
 ### 4.1. Nhóm API Thông báo thường & Quản lý danh sách (`/api/v1/notifications`)
 
 #### 4.1.1. `GET /api/v1/notifications`
-- **Mô tả**: Lấy danh sách thông báo của người dùng hiện tại (hỗ trợ phân trang).
+- **Mô tả**: Lấy danh sách thông báo của người dùng hiện tại (hỗ trợ phân trang, lọc theo trạng thái).
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Query Params**:
   - `page`: Số trang (mặc định: `1`).
   - `limit`: Số thông báo mỗi trang (mặc định: `20`).
   - `unreadOnly`: Lọc thông báo chưa đọc (`true/false`).
+  - `status`: Lọc theo trạng thái gửi (`PENDING`, `COMPLETED`, `FAILED`, mặc định: `COMPLETED`).
 - **Response**: `200 OK`
   ```json
   {
@@ -233,6 +289,7 @@ sequenceDiagram
           "type": "COMMENT_POST",
           "title": "Bình luận mới",
           "message": "Tran Thi B đã bình luận vào bài viết của bạn.",
+          "status": "COMPLETED",
           "sender": {
             "id": "78a9c140-5b43-41bb-aef3-018274cbef01",
             "username": "user_b",
@@ -242,6 +299,7 @@ sequenceDiagram
           "referenceId": "e4b3e811-9a42-4f36-8a71-6c1cf6ec32b9",
           "referenceType": "POST",
           "isRead": false,
+          "sentAt": "2026-10-02T17:15:02.000Z",
           "createdAt": "2026-10-02T17:15:00.000Z"
         }
       ],
@@ -266,9 +324,63 @@ sequenceDiagram
 
 ---
 
-### 4.2. Nhóm API Thông báo Lập lịch cho Bạn bè (`/api/v1/notifications/schedules`)
+### 4.2. API Callback Cập nhật trạng thái thông báo (`notify-completed`)
 
-#### 4.2.1. `POST /api/v1/notifications/schedules`
+#### 4.2.1. `POST /api/v1/notifications/notify-completed`
+- **Mô tả**: Endpoint bảo mật nội bộ dành riêng cho **AWS Lambda Worker** gọi sau khi đã xử lý gửi thông báo (qua WebSocket / Push) để cập nhật trạng thái bản ghi thông báo trong Database từ `PENDING` / `PROCESSING` sang `COMPLETED` (hoặc `FAILED` nếu có lỗi).
+- **Quyền truy cập**: **Internal API Guard** (Yêu cầu Header `x-internal-api-key: Bearer <INTERNAL_API_SECRET>` hoặc AWS IAM SigV4). Người dùng thông thường không có quyền truy cập endpoint này.
+- **Request Headers**:
+  - `Content-Type`: `application/json`
+  - `x-internal-api-key`: `<SHARED_INTERNAL_SECRET_KEY>`
+- **Request Body**:
+  ```json
+  {
+    "notificationId": "f516a8d0-990a-44c1-84de-c82098b67151",
+    "scheduleId": null,
+    "status": "COMPLETED",
+    "deliveredVia": "WEBSOCKET",
+    "sentAt": "2026-10-03T14:15:00.000Z",
+    "errorMessage": null
+  }
+  ```
+  *Trường hợp cập nhật cho Scheduled Notification:*
+  ```json
+  {
+    "notificationId": null,
+    "scheduleId": "9d18e8a0-43aa-4e12-b912-3210ef87a012",
+    "status": "COMPLETED",
+    "totalRecipients": 25,
+    "sentAt": "2026-10-03T14:15:00.000Z",
+    "errorMessage": null
+  }
+  ```
+- **Validation Rules**:
+  - Tối thiểu một trong hai trường `notificationId` hoặc `scheduleId` phải có giá trị (UUID v4 hợp lệ).
+  - `status`: Bắt buộc, thuộc enum `NotificationStatus` (`COMPLETED`, `FAILED`).
+  - `sentAt`: Định dạng ISO-8601 (bắt buộc khi `status = COMPLETED`).
+  - `errorMessage`: Chuỗi string giải thích lý do thất bại nếu `status = FAILED`.
+- **Response**: `200 OK`
+  ```json
+  {
+    "statusCode": 200,
+    "message": "Notification status updated successfully",
+    "data": {
+      "id": "f516a8d0-990a-44c1-84de-c82098b67151",
+      "status": "COMPLETED",
+      "sentAt": "2026-10-03T14:15:00.000Z"
+    }
+  }
+  ```
+- **Lỗi thường gặp**:
+  - `401 Unauthorized`: Thiếu hoặc sai header `x-internal-api-key`.
+  - `404 Not Found`: Không tìm thấy bản ghi `notificationId` hoặc `scheduleId`.
+  - `400 Bad Request`: Payload không hợp lệ.
+
+---
+
+### 4.3. Nhóm API Thông báo Lập lịch cho Bạn bè (`/api/v1/notifications/schedules`)
+
+#### 4.3.1. `POST /api/v1/notifications/schedules`
 - **Mô tả**: Tạo một lịch hẹn gửi thông báo cho bạn bè vào thời gian xác định trong tương lai.
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Request Body**:
@@ -284,7 +396,7 @@ sequenceDiagram
 - **Validation**:
   - `title`: từ 3 đến 200 ký tự.
   - `content`: từ 5 đến 2000 ký tự.
-  - `scheduledAt`: Định dạng ISO-8601, phải ở thì tương lai (tối thiểu sau thời điểm hiện tại 5 phút).
+  - `scheduledAt`: Định dạng ISO-8601, phải ở tương lai (tối thiểu sau thời điểm hiện tại 5 phút).
   - `targetType`: `ALL_FRIENDS` hoặc `SELECTED_FRIENDS`.
   - `targetUserIds`: Bắt buộc nếu chọn `SELECTED_FRIENDS`, mảng chứa các UUID bạn bè hợp lệ.
 - **Response**: `201 Created`
@@ -304,12 +416,12 @@ sequenceDiagram
   }
   ```
 
-#### 4.2.2. `GET /api/v1/notifications/schedules`
+#### 4.3.2. `GET /api/v1/notifications/schedules`
 - **Mô tả**: Lấy danh sách các lịch thông báo do người dùng hiện tại đã tạo.
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Response**: `200 OK` (Danh sách các lịch kèm trạng thái `PENDING`, `COMPLETED`, `CANCELLED`).
 
-#### 4.2.3. `DELETE /api/v1/notifications/schedules/:id`
+#### 4.3.3. `DELETE /api/v1/notifications/schedules/:id`
 - **Mô tả**: Hủy bỏ lịch hẹn gửi thông báo trước khi nó kích hoạt.
 - **Quyền truy cập**: Authenticated (`Bearer <accessToken>`).
 - **Logic**:
@@ -319,11 +431,84 @@ sequenceDiagram
 
 ---
 
-## 5. Tối ưu hiệu năng & Độ tin cậy (Reliability & Scalability)
+## 5. Cấu hình Hạ tầng AWS & SST (Infrastructure Specification)
 
-1. **Idempotency & Tránh gửi trùng lặp**:
-   - Sử dụng cơ chế lock phân tán (Redis Distributed Lock) hoặc cờ trạng thái `status = 'PROCESSING'` để đảm bảo worker SQS không xử lý trùng 2 lần một lịch thông báo.
-2. **Xử lý số lượng lớn bạn bè (Fan-out Pattern)**:
-   - Với người dùng có hàng nghìn bạn bè, worker chia danh sách bạn bè thành các mẻ (batch 100 users/batch) để thực hiện `INSERT` vào database và push WebSocket tuần tự, tránh quá tải RAM và Connection Pool của database.
-3. **Dead Letter Queue (DLQ)**:
-   - Hàng đợi SQS được gắn kèm DLQ để lưu lại các thông báo lập lịch lỗi, hỗ trợ debug và retry an toàn.
+### 5.1. Định nghĩa SQS & Lambda Worker trong `sst.config.ts`
+
+Trong cấu hình SST v3 (`sst.config.ts`), hệ thống bổ sung:
+- **SQS Queue**: `NotificationQueue` xử lý hàng đợi sự kiện thông báo.
+- **Dead Letter Queue (DLQ)**: `NotificationDLQ` hứng các message bị lỗi sau 3 lần retry.
+- **Lambda Function (Worker)**: Subscribe vào `NotificationQueue` và có quyền kết nối tới WebSocket API Gateway cũng như gọi API Backend.
+
+```typescript
+// sst.config.ts (Đoạn cấu hình Queue & Worker)
+
+// 1. Dead Letter Queue
+const notificationDlq = new sst.aws.Queue("NotificationDLQ");
+
+// 2. Main Notification Queue
+const notificationQueue = new sst.aws.Queue("NotificationQueue", {
+  dlq: {
+    queue: notificationDlq.arn,
+    retry: 3,
+  },
+  transform: {
+    queue: {
+      queueName: "social-notification-queue",
+      visibilityTimeout: 30, // 30 seconds
+    },
+  },
+});
+
+// 3. Lambda Consumer Function
+notificationQueue.subscribe({
+  handler: "infra/lambda-handler/notification/consumer.handler",
+  environment: {
+    WEBSOCKET_ENDPOINT: notificationWs.managementEndpoint,
+    API_INTERNAL_URL: "https://api.domain.com/api/v1", // hoặc VPC internal URL
+    INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || "internal-secret-token",
+    REDIS_HOST: process.env.REDIS_HOST || "localhost",
+    REDIS_PORT: process.env.REDIS_PORT || "6379",
+  },
+  permissions: [
+    {
+      actions: ["execute-api:ManageConnections"],
+      resources: ["*"],
+    },
+  ],
+});
+```
+
+### 5.2. Cấu trúc Message trong SQS Queue
+
+Message body được chuẩn hóa dưới dạng JSON:
+
+```json
+{
+  "eventId": "evt_7f8a9b0c-1234-5678-90ab-cdef12345678",
+  "eventType": "NOTIFICATION_DISPATCH",
+  "notificationId": "f516a8d0-990a-44c1-84de-c82098b67151",
+  "recipientId": "b6a82741-2cbe-4c4f-a9cb-b61005d58ff3",
+  "senderId": "78a9c140-5b43-41bb-aef3-018274cbef01",
+  "type": "COMMENT_POST",
+  "title": "Bình luận mới",
+  "message": "Tran Thi B đã bình luận vào bài viết của bạn.",
+  "referenceId": "e4b3e811-9a42-4f36-8a71-6c1cf6ec32b9",
+  "referenceType": "POST",
+  "createdAt": "2026-10-03T14:15:00.000Z"
+}
+```
+
+---
+
+## 6. Tối ưu hiệu năng, Độ tin cậy & Xử lý sự cố (Reliability & Scalability)
+
+1. **Idempotency (Tính bất biến khi gọi lại)**:
+   - Lambda Worker có thể xử lý lại message do cơ chế At-Least-Once Delivery của SQS. API `notify-completed` kiểm tra trạng thái: nếu bản ghi đã ở trạng thái `COMPLETED` thì trả về thành công mà không ghi đè lại dữ liệu cũ, tránh duplicate updates.
+2. **Cơ chế Retry & Dead Letter Queue (DLQ)**:
+   - Nếu Lambda không thể gửi tới WebSocket (hoặc gọi API callback bị timeout), message được SQS retry tối đa 3 lần với exponential backoff.
+   - Khi vượt quá 3 lần, message rơi vào `NotificationDLQ` để đội ngũ kỹ thuật phân tích và trigger Lambda gọi `notify-completed` với status `FAILED`.
+3. **Bảo mật Internal API Callback**:
+   - Sử dụng Shared Secret qua header `x-internal-api-key` hoặc AWS IAM SigV4 authentication giữa Lambda và NestJS API để đảm bảo chỉ có worker nội bộ mới được phép cập nhật trạng thái thông báo.
+4. **Xử lý số lượng lớn bạn bè (Fan-out Pattern)**:
+   - Với các thông báo lập lịch có hàng nghìn người nhận, Worker chia nhỏ danh sách theo các lô (batch 100 users/batch) để gửi qua WebSocket và bulk update trạng thái, tránh làm cạn kiệt tài nguyên bộ nhớ Lambda.

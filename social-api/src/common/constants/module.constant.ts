@@ -9,6 +9,8 @@ export const TABLE_NAMES = {
   LIKES: 'likes',
   FOLLOWS: 'follows',
   FRIENDSHIPS: 'friendships',
+  NOTIFICATIONS: 'notifications',
+  SCHEDULED_NOTIFICATIONS: 'scheduled_notifications',
 } as const;
 
 export const DEFAULT_PAGE_SIZE = 10;
