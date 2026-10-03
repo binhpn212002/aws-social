@@ -10,6 +10,22 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "ChatConversationsTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "ChatMessagesTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "NotificationDLQ": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "NotificationQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "NotificationWebSocket": {
       "managementEndpoint": string
       "type": "sst.aws.ApiGatewayWebSocket"
@@ -18,10 +34,6 @@ declare module "sst" {
     "SocialBucket": {
       "name": string
       "type": "sst.aws.Bucket"
-    }
-    "SocialChatTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
     }
   }
 }
