@@ -14,8 +14,8 @@ export interface JwtPayload {
 @Injectable()
 export class TokenService {
   private readonly jwtSecret: string;
-  private readonly accessTokenExpiresIn = 900; // 15 minutes
-  private readonly refreshTokenExpiresIn = 604800; // 7 days
+  private readonly accessTokenExpiresIn = 604800; // 7 days (604800s)
+  private readonly refreshTokenExpiresIn = 2592000; // 30 days (2592000s)
 
   constructor(
     private readonly jwtService: JwtService,

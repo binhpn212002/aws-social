@@ -27,10 +27,10 @@ export class SqsProducerService {
     this.sqsClient = new SQSClient({
       region: this.configService.get<string>('AWS_REGION', 'ap-southeast-1'),
     });
-    this.queueUrl = this.configService.get<string>(
-      'NOTIFICATION_QUEUE_URL',
-      'https://sqs.ap-southeast-1.amazonaws.com/123456789012/social-notification-queue',
-    );
+    this.queueUrl =
+      this.configService.get<string>('AWS_SQS_NOTIFICATION_QUEUE_URL') ||
+      this.configService.get<string>('NOTIFICATION_QUEUE_URL') ||
+      'https://sqs.ap-southeast-1.amazonaws.com/123456789012/social-notification-queue';
   }
 
   async pushToQueue(payload: NotificationQueuePayload): Promise<string | undefined> {

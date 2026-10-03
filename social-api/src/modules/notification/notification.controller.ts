@@ -52,11 +52,7 @@ export class NotificationController {
     @CurrentUser('id') userId: string,
     @Query() query: GetNotificationsQueryDto,
   ) {
-    const data = await this.notificationService.getNotifications(userId, query);
-    return {
-      statusCode: HttpStatus.OK,
-      data,
-    };
+    return this.notificationService.getNotifications(userId, query);
   }
 
   @Patch(':id/read')

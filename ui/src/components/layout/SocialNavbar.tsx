@@ -20,6 +20,7 @@ import {
 import Image from 'next/image';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 import { Link } from '@/libs/I18nNavigation';
 import type { ApiPostAuthor } from '@/services/api';
 
@@ -98,32 +99,43 @@ export const SocialNavbar: React.FC<SocialNavbarProps> = ({
   onToggleChatDock,
 }) => {
   const { user, isAuthenticated, logout } = useAuth();
+  const {
+    isConnected,
+    notifications,
+    unreadCount,
+    markAsRead,
+    markAllAsRead,
+  } = useNotifications();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const sampleNotifications = [
-    {
-      id: '1',
-      sender: 'Vũ Quốc Bảo',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
-      action: 'đã thích bài viết của bạn',
-      time: '5 phút trước',
-      isRead: false,
-    },
-    {
-      id: '2',
-      sender: 'Lê Mai Hương',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
-      action: 'đã chấp nhận lời mời kết bạn',
-      time: '20 phút trước',
-      isRead: false,
-    },
-  ];
-
-  const handleLogoutAction = () => {
+  const handleLogoutAction = async () => {
     setShowUserMenu(false);
-    void logout();
+    try {
+      await logout();
+    } catch (error) {
+      console.error('logout error:', error);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await markAllAsRead();
+    } catch (error) {
+      console.error('markAllAsRead error:', error);
+    }
+  };
+
+  const handleNotificationClick = async (notifId: string, isRead: boolean) => {
+    if (isRead) {
+      return;
+    }
+    try {
+      await markAsRead(notifId);
+    } catch (error) {
+      console.error('markAsRead error:', error);
+    }
   };
 
   return (
@@ -196,6 +208,27 @@ export const SocialNavbar: React.FC<SocialNavbarProps> = ({
                 </span>
               </button>
 
+              {/* AWS WebSocket Status Badge */}
+              <div
+                className="hidden items-center gap-1.5 rounded-full border border-slate-200/80 bg-slate-50/80 px-2.5 py-1 text-xs font-medium backdrop-blur sm:flex dark:border-slate-800 dark:bg-slate-800/80"
+                title={
+                  isConnected
+                    ? 'AWS WebSocket: Đang kết nối trực tuyến'
+                    : 'AWS WebSocket: Đang kết nối...'
+                }
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    isConnected
+                      ? 'animate-pulse bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                      : 'bg-amber-400'
+                  }`}
+                />
+                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                  {isConnected ? 'Realtime' : 'Connecting'}
+                </span>
+              </div>
+
               {/* Notifications Icon & Popover */}
               <div className="relative">
                 <button
@@ -208,45 +241,84 @@ export const SocialNavbar: React.FC<SocialNavbarProps> = ({
                   className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200/80 bg-slate-100/60 text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   <Bell className="h-4 w-4" />
-                  <span className="absolute top-1 right-1 flex h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-md ring-2 ring-white dark:ring-slate-900">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </button>
 
                 {showNotifications && (
                   <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl backdrop-blur-lg sm:w-96 dark:border-slate-800 dark:bg-slate-900">
                     <div className="flex items-center justify-between border-b border-slate-100 px-1 pb-2 dark:border-slate-800">
-                      <span className="font-bold text-slate-900 dark:text-white">Thông báo</span>
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                      >
-                        <Check className="h-3 w-3" /> Đánh dấu đã đọc tất cả
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 dark:text-white">Thông báo</span>
+                        {unreadCount > 0 && (
+                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+                            {unreadCount} mới
+                          </span>
+                        )}
+                      </div>
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleMarkAllAsRead}
+                          className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                        >
+                          <Check className="h-3 w-3" /> Đánh dấu đã đọc
+                        </button>
+                      )}
                     </div>
                     <div className="mt-2 max-h-80 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-                      {sampleNotifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          className="flex items-start gap-3 rounded-xl p-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                        >
-                          <Image
-                            src={notif.avatar}
-                            alt={notif.sender}
-                            width={36}
-                            height={36}
-                            unoptimized
-                            className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-indigo-500/20"
-                          />
-                          <div className="flex-1 text-xs">
-                            <p className="text-slate-800 dark:text-slate-200">
-                              <strong className="font-semibold text-slate-900 dark:text-white">
-                                {notif.sender}
-                              </strong>{' '}
-                              {notif.action}
-                            </p>
-                            <span className="mt-1 block text-[11px] text-slate-400">{notif.time}</span>
-                          </div>
+                      {notifications.length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">
+                          Chưa có thông báo nào
                         </div>
-                      ))}
+                      ) : (
+                        notifications.map((notif) => (
+                          <button
+                            type="button"
+                            key={notif.id}
+                            onClick={() => {
+                              handleNotificationClick(notif.id, notif.isRead);
+                            }}
+                            className={`flex w-full cursor-pointer items-start gap-3 rounded-xl p-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/60 ${
+                              notif.isRead ? '' : 'bg-indigo-50/50 dark:bg-indigo-950/20'
+                            }`}
+                          >
+                            <div className="relative">
+                              <Image
+                                src={
+                                  notif.sender?.avatarUrl ||
+                                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+                                }
+                                alt={notif.sender?.fullName || notif.title}
+                                width={36}
+                                height={36}
+                                unoptimized
+                                className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-indigo-500/20"
+                              />
+                              {!notif.isRead && (
+                                <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-indigo-600 ring-2 ring-white dark:ring-slate-900" />
+                              )}
+                            </div>
+                            <div className="flex-1 text-xs">
+                              <p className="text-slate-800 dark:text-slate-200">
+                                <strong className="font-semibold text-slate-900 dark:text-white">
+                                  {notif.sender?.fullName || notif.title}
+                                </strong>{' '}
+                                {notif.message}
+                              </p>
+                              <span className="mt-1 block text-[11px] text-slate-400">
+                                {new Date(notif.createdAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                          </button>
+                        ))
+                      )}
                     </div>
                   </div>
                 )}

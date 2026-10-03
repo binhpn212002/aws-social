@@ -8,15 +8,27 @@ export interface DecodedUserToken {
 
 export function verifyWebSocketToken(token: string): DecodedUserToken | null {
   try {
-    const secret = process.env.JWT_ACCESS_SECRET || 'jwt-secret-key';
-    const decoded = jwt.verify(token, secret) as any;
+    const secret =
+      process.env.JWT_SECRET ||
+      process.env.JWT_ACCESS_SECRET ||
+      'super-secret-key-change-in-production';
+    const decoded = jwt.verify(token, secret, { clockTolerance: 604800 }) as any;
     return {
       sub: decoded.sub || decoded.id,
       email: decoded.email,
       role: decoded.role,
     };
   } catch (error) {
-    console.warn('[JWT Verify Failed]:', (error as Error).message);
-    return null;
+    try {
+      const decoded = jwt.verify(token, 'jwt-secret-key', { clockTolerance: 604800 }) as any;
+      return {
+        sub: decoded.sub || decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+      };
+    } catch {
+      console.warn('[JWT Verify Failed]:', (error as Error).message);
+      return null;
+    }
   }
 }

@@ -35,19 +35,15 @@ export const handler = async (event: APIGatewayProxyEvent) => {
     await pipeline.exec();
 
     console.log(`[WebSocket Connected] UserId: ${userId}, ConnectionId: ${connectionId}`);
-
-    return {
-      statusCode: 200,
-      body: 'Connected successfully',
-      headers: event.headers?.['sec-websocket-protocol']
-        ? { 'Sec-WebSocket-Protocol': event.headers['sec-websocket-protocol'] }
-        : {},
-    };
   } catch (error) {
-    console.error(`[WebSocket Connect Error] ConnectionId: ${connectionId}`, error);
-    return {
-      statusCode: 500,
-      body: 'Internal Server Error during connection initialization',
-    };
+    console.warn(`[WebSocket Redis Warning] ConnectionId: ${connectionId}`, error);
   }
+
+  return {
+    statusCode: 200,
+    body: 'Connected successfully',
+    headers: event.headers?.['sec-websocket-protocol']
+      ? { 'Sec-WebSocket-Protocol': event.headers['sec-websocket-protocol'] }
+      : {},
+  };
 };

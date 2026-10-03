@@ -345,6 +345,57 @@ class ApiService {
       }),
     });
   }
+  // ------------------------------------
+  // NOTIFICATIONS
+  // ------------------------------------
+  async getNotifications(page = 1, pageSize = 20) {
+    return await this.request<ApiNotificationsResponse>(
+      `/notifications?page=${page}&pageSize=${pageSize}`,
+    );
+  }
+
+  async markNotificationAsRead(id: string) {
+    return await this.request(`/notifications/${id}/read`, {
+      method: 'PATCH',
+    });
+  }
+
+  async markAllNotificationsAsRead() {
+    return await this.request('/notifications/read-all', {
+      method: 'PATCH',
+    });
+  }
+}
+
+export interface ApiNotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  status: string;
+  sender?: {
+    id: string;
+    username: string;
+    fullName: string;
+    avatarUrl?: string;
+  } | null;
+  referenceId?: string;
+  referenceType?: string;
+  isRead: boolean;
+  readAt?: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface ApiNotificationsResponse {
+  items: ApiNotificationItem[];
+  meta: {
+    totalItems: number;
+    unreadCount: number;
+    currentPage: number;
+    pageSize: number;
+    totalPages: number;
+  };
 }
 
 export const api = new ApiService();

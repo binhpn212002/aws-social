@@ -32,7 +32,7 @@ export class ChatWsService {
   }
 
   private getUserConnectionKey(userId: string): string {
-    return `ws:chat:user:${userId}`;
+    return `ws:user:${userId}:connections`;
   }
 
   async registerConnection(userId: string, connectionId: string): Promise<void> {
