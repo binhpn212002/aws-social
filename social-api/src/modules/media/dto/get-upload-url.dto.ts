@@ -26,7 +26,7 @@ export class GetUploadUrlDto {
   })
   @IsString()
   @IsOptional()
-  @Matches(/^[a-zA-Z0-9_\-\/]+$/, {
+  @Matches(/^[a-zA-Z0-9_\-/]+$/, {
     message:
       'Folder chỉ được chứa ký tự chữ, số, gạch dưới, gạch ngang và dấu gạch chéo',
   })

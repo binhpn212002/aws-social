@@ -14,6 +14,7 @@ import { UserModule } from './modules/user/user.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MediaModule } from './modules/media/media.module';
 import { PostModule } from './modules/post/post.module';
+import { FriendModule } from './modules/friend/friend.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -44,6 +45,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     AuthModule,
     MediaModule,
     PostModule,
+    FriendModule,
   ],
   controllers: [AppController],
   providers: [
