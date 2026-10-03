@@ -58,6 +58,14 @@ export default $config({
       },
     });
 
+    const notificationWs = new sst.aws.ApiGatewayWebSocket("NotificationWebSocket", {
+      transform: {
+        api: {
+          name: "social-notification-ws",
+        },
+      },
+    });
+
     return {
       bucketName: bucket.name,
       bucketArn: bucket.arn,
@@ -65,6 +73,8 @@ export default $config({
       chatTableArn: chatTable.arn,
       auditLogTableName: auditLogTable.name,
       auditLogTableArn: auditLogTable.arn,
+      websocketUrl: notificationWs.url,
+      websocketManagementEndpoint: notificationWs.managementEndpoint,
     };
   },
 });

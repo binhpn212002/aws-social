@@ -10,6 +10,11 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "NotificationWebSocket": {
+      "managementEndpoint": string
+      "type": "sst.aws.ApiGatewayWebSocket"
+      "url": string
+    }
     "SocialBucket": {
       "name": string
       "type": "sst.aws.Bucket"

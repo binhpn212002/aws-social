@@ -17,4 +17,9 @@ export default registerAs('aws', () => ({
     region:
       process.env.AWS_DYNAMODB_REGION || process.env.AWS_REGION || 'ap-southeast-1',
   },
+  websocket: {
+    endpoint: process.env.AWS_WEBSOCKET_ENDPOINT,
+    managementEndpoint: process.env.AWS_WEBSOCKET_MANAGEMENT_ENDPOINT,
+  },
 }));
+
