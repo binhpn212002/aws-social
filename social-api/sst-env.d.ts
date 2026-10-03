@@ -6,9 +6,17 @@
 
 declare module "sst" {
   export interface Resource {
+    "AuditLogTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "SocialBucket": {
       "name": string
       "type": "sst.aws.Bucket"
+    }
+    "SocialChatTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
     }
   }
 }

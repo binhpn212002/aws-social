@@ -30,9 +30,41 @@ export default $config({
       },
     });
 
+    const chatTable = new sst.aws.Dynamo("SocialChatTable", {
+      fields: {
+        PK: "string",
+        SK: "string",
+      },
+      primaryIndex: { hashKey: "PK", rangeKey: "SK" },
+      ttl: "ttl",
+      transform: {
+        table: {
+          name: "social-chat-table",
+        },
+      },
+    });
+
+    const auditLogTable = new sst.aws.Dynamo("AuditLogTable", {
+      fields: {
+        PK: "string",
+        SK: "string",
+      },
+      primaryIndex: { hashKey: "PK", rangeKey: "SK" },
+      ttl: "ttl",
+      transform: {
+        table: {
+          name: "social-audit-logs",
+        },
+      },
+    });
+
     return {
       bucketName: bucket.name,
       bucketArn: bucket.arn,
+      chatTableName: chatTable.name,
+      chatTableArn: chatTable.arn,
+      auditLogTableName: auditLogTable.name,
+      auditLogTableArn: auditLogTable.arn,
     };
   },
 });
