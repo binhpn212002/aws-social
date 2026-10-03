@@ -5,7 +5,7 @@ let redisInstance: Redis | null = null;
 export function getRedisClient(): Redis {
   if (!redisInstance) {
     redisInstance = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
+      host: process.env.REDIS_HOST || '116.118.3.84',
       port: Number(process.env.REDIS_PORT) || 6379,
       password: process.env.REDIS_PASSWORD || undefined,
       lazyConnect: false,

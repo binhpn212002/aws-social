@@ -81,7 +81,7 @@ export default $config({
     notificationWs.route("$connect", {
       handler: "infra/lambda-handler/websocket/connect.handler",
       environment: {
-        REDIS_HOST: process.env.REDIS_HOST || "localhost",
+        REDIS_HOST: process.env.REDIS_HOST || "116.118.3.84",
         REDIS_PORT: process.env.REDIS_PORT || "6379",
         REDIS_PASSWORD: process.env.REDIS_PASSWORD || "",
         JWT_SECRET: process.env.JWT_SECRET || "super-secret-key-change-in-production",
@@ -95,7 +95,7 @@ export default $config({
     notificationWs.route("$disconnect", {
       handler: "infra/lambda-handler/websocket/disconnect.handler",
       environment: {
-        REDIS_HOST: process.env.REDIS_HOST || "localhost",
+        REDIS_HOST: process.env.REDIS_HOST || "116.118.3.84",
         REDIS_PORT: process.env.REDIS_PORT || "6379",
         REDIS_PASSWORD: process.env.REDIS_PASSWORD || "",
       },
@@ -154,7 +154,7 @@ export default $config({
         WEBSOCKET_ENDPOINT: notificationWs.managementEndpoint,
         API_INTERNAL_URL: process.env.API_INTERNAL_URL || "http://localhost:3000/api/v1",
         INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || "internal-secret-token",
-        REDIS_HOST: process.env.REDIS_HOST || "localhost",
+        REDIS_HOST: process.env.REDIS_HOST || "116.118.3.84",
         REDIS_PORT: process.env.REDIS_PORT || "6379",
         REDIS_PASSWORD: process.env.REDIS_PASSWORD || "",
       },
